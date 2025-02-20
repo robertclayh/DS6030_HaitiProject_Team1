@@ -1,0 +1,84 @@
+---
+title: "Project Part 1"
+author: "Virginia Brame, Clay Harris, Hai Liu"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+header-includes:
+  - \usepackage{float}
+---
+```{r setup}
+knitr::opts_chunk$set(echo=TRUE)
+knitr::opts_chunk$set(cache=TRUE, autodep=TRUE)
+knitr::opts_chunk$set(fig.align="center", fig.pos="H")
+```
+
+```{r parallel}
+#| cache: FALSE
+#| message: FALSE
+library(doParallel)
+cl <- makePSOCKcluster(parallel::detectCores(logical = FALSE))
+registerDoParallel(cl)
+```
+
+```{r libraries}
+#| warning: FALSE
+#| message: FALSE
+library(tidyverse)
+library(tidymodels)
+library(discrim)
+```
+
+## Data loading
+
+```{r}
+#| message: FALSE
+files <- c(
+  "orthovnir057_ROI_NON_Blue_Tarps.txt",
+  "orthovnir078_ROI_NON_Blue_Tarps.txt",
+  "orthovnir067_ROI_NOT_Blue_Tarps.txt",
+  "orthovnir069_ROI_NOT_Blue_Tarps.txt"
+)
+
+non_not_blue_data <- map_dfr(files, ~ {
+  read_fwf(
+    file = .x,
+    col_positions = fwf_widths(
+      widths = c(6, 6, 10, 12, 12, 10, 12, 5, 5, 5),
+      col_names = c("ID", "X", "Y", "Map_X", "Map_Y", "Lat", "Lon", "B1", "B2", "B3")
+    ),
+    skip = 8
+  ) %>%
+    mutate(Class = str_extract(.x, "(NON_Blue_Tarps|NOT_Blue_Tarps)"))
+})
+```
+
+```{r}
+#| message: FALSE
+blue_files <- c(
+  "orthovnir069_ROI_Blue_Tarps.txt",
+  "orthovnir067_ROI_Blue_Tarps.txt",
+  "orthovnir078_ROI_Blue_Tarps.txt"
+)
+
+blue_data <- map_dfr(blue_files, ~ {
+  read_fwf(
+    file = .x,
+    col_positions = fwf_widths(
+      widths = c(5, 6, 10, 12, 11, 10, 12, 5, 5, 5),
+      col_names = c("ID", "X", "Y", "Map_X", "Map_Y", "Lat", "Lon", "B1", "B2", "B3")
+    ),
+    skip = 8
+  ) %>%
+    mutate(Class = "Blue_Tarps")
+})
+```
+
+```{r}
+holdout_data <- bind_rows(
+  non_not_blue_data %>% select(Lat, Lon, B1, B2, B3, Class),
+  blue_data %>% select(Lat, Lon, B1, B2, B3, Class)
+)
+
+glimpse(holdout_data)
+```

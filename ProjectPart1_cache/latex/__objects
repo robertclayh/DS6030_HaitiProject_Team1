@@ -1,0 +1,7 @@
+libraries	
+load data	diabetes	file_url	temp_file
+conversion	diabetes
+data split	data_split	test_data	train_data	.Random.seed
+unnamed-chunk-1	files	non_not_blue_data
+unnamed-chunk-2	blue_data	blue_files
+unnamed-chunk-3	holdout_data
