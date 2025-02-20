@@ -27,6 +27,11 @@ registerDoParallel(cl)
 library(tidyverse)
 library(tidymodels)
 library(discrim)
+library(leaflet)
+library(terra)
+library(htmlwidgets)
+library(leafem)
+library(stars)
 ```
 
 ## Data loading
@@ -82,3 +87,53 @@ holdout_data <- bind_rows(
 
 glimpse(holdout_data)
 ```
+```{r}
+# Convert holdout_data for terra
+holdout_data_sp <- holdout_data %>% 
+  rename(x = Lon, y = Lat)
+v <- terra::vect(holdout_data_sp, geom = c("x", "y"), crs = "EPSG:4326")
+
+# Reproject to UTM (resolution in meters)
+v_utm <- terra::project(v, "EPSG:32618")
+
+# Create an empty raster with 0.1 m resolution
+r_empty <- terra::rast(terra::ext(v_utm), resolution = 0.1, crs = "EPSG:32618")
+
+# Rasterize each band
+r_b1 <- terra::rasterize(v_utm, r_empty, field = "B1", filename = "r_b1.tif", overwrite = TRUE)
+r_b2 <- terra::rasterize(v_utm, r_empty, field = "B2", filename = "r_b2.tif", overwrite = TRUE)
+r_b3 <- terra::rasterize(v_utm, r_empty, field = "B3", filename = "r_b3.tif", overwrite = TRUE)
+
+# Combine bands
+rgb_raster <- c(r_b1, r_b2, r_b3)
+
+# Reproject the multi-band raster back to WGS84
+rgb_raster_wgs <- terra::project(rgb_raster, "EPSG:4326", filename = "rgb_raster_wgs.tif", overwrite = TRUE)
+
+# Convert to a RasterBrick
+rgb_brick <- raster::brick(rgb_raster_wgs)
+```
+
+```{r}
+# Create map
+#m <- leaflet() %>%
+#  addTiles() %>%
+#  leafem::addRasterRGB(rgb_brick, r = 1, g = 2, b = 3)
+
+# Save the map
+#htmlwidgets::saveWidget(m, "interactive_map.html")
+```
+
+```{r}
+#| message: FALSE
+# Aggregate raster by a factor of 10
+rgb_brick_coarse <- raster::aggregate(rgb_brick, fact = 10, fun = mean)
+
+# Create map
+m <- leaflet() %>%
+  addTiles() %>%
+  leafem::addRasterRGB(rgb_brick_coarse, r = 1, g = 2, b = 3)
+
+htmlwidgets::saveWidget(m, "interactive_map_coarse.html")
+```
+

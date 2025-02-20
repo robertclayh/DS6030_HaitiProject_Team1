@@ -25,3 +25,10 @@ workflows
 workflowsets
 yardstick
 discrim
+leaflet
+terra
+htmlwidgets
+leafem
+abind
+sf
+stars
