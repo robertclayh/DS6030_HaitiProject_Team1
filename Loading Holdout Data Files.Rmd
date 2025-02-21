@@ -117,6 +117,8 @@ ggplot(holdout_DRH, aes(x=BlueTarp)) +
   geom_histogram(stat = "count", fill = "lightblue")
 ```
 ```{r}
+# this is not writing the file with the changes we made... all the wrangling is being lost
+# look into this tomorrow
 write_csv(holdout_DRH, "DisasterRelief_Haiti_HoldoutDS.csv")
 ```
 
