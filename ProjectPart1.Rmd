@@ -22,6 +22,7 @@ registerDoParallel(cl)
 ```
 
 ```{r libraries}
+#| cache: FALSE
 #| warning: FALSE
 #| message: FALSE
 library(tidyverse)
@@ -31,65 +32,423 @@ library(leaflet)
 library(terra)
 library(htmlwidgets)
 library(leafem)
-library(stars)
 library(colordistance)
 library(jpeg)
+library(patchwork)
+library(probably)
 ```
 
 ## Data loading
 
-```{r}
+```{r holdout data processing}
 #| message: FALSE
-files <- c(
-  "orthovnir057_ROI_NON_Blue_Tarps.txt",
-  "orthovnir078_ROI_NON_Blue_Tarps.txt",
-  "orthovnir067_ROI_NOT_Blue_Tarps.txt",
-  "orthovnir069_ROI_NOT_Blue_Tarps.txt"
-)
+#| warning: FALSE
 
-non_not_blue_data <- map_dfr(files, ~ {
-  read_fwf(
-    file = .x,
-    col_positions = fwf_widths(
-      widths = c(6, 6, 10, 12, 12, 10, 12, 5, 5, 5),
-      col_names = c("ID", "X", "Y", "Map_X", "Map_Y", "Lat", "Lon", "B1", "B2", "B3")
-    ),
-    skip = 8
-  ) %>%
-    mutate(Class = str_extract(.x, "(NON_Blue_Tarps|NOT_Blue_Tarps)"))
-})
-```
+col_names <- c('ID','X','Y','Map X','Map Y','Lat','Lon','Red','Green','Blue')
 
-```{r}
-#| message: FALSE
 blue_files <- c(
   "orthovnir069_ROI_Blue_Tarps.txt",
   "orthovnir067_ROI_Blue_Tarps.txt",
   "orthovnir078_ROI_Blue_Tarps.txt"
 )
 
-blue_data <- map_dfr(blue_files, ~ {
-  read_fwf(
-    file = .x,
-    col_positions = fwf_widths(
-      widths = c(5, 6, 10, 12, 11, 10, 12, 5, 5, 5),
-      col_names = c("ID", "X", "Y", "Map_X", "Map_Y", "Lat", "Lon", "B1", "B2", "B3")
-    ),
-    skip = 8
-  ) %>%
-    mutate(Class = "Blue_Tarps")
-})
+non_blue_files <- c(
+  "orthovnir057_ROI_NON_Blue_Tarps.txt",
+  "orthovnir078_ROI_NON_Blue_Tarps.txt",
+  "orthovnir067_ROI_NOT_Blue_Tarps.txt",
+  "orthovnir069_ROI_NOT_Blue_Tarps.txt"
+)
+
+blue_data <- map_dfr(blue_files, ~ 
+  read_table(file.path("./HoldoutData", .x), comment = ";", col_names = col_names) %>% 
+    select(Lat, Lon, Red, Green, Blue) %>% 
+    mutate(BT = "TRUE")
+)
+
+non_blue_data <- map_dfr(non_blue_files, ~ 
+  read_table(file.path("./HoldoutData", .x), comment = ";", col_names = col_names) %>% 
+    select(Lat, Lon, Red, Green, Blue) %>% 
+    mutate(BT = "FALSE")
+)
+
+holdout_data <- bind_rows(blue_data, non_blue_data) %>% 
+  mutate(BT = factor(BT, levels = c("TRUE", "FALSE")))
+```
+
+```{r training data processing}
+#| message: FALSE
+
+train_data <- read_csv("HaitiPixels.csv") %>%
+  mutate(BT = factor(if_else(Class == "Blue Tarp", "TRUE", "FALSE"), levels = c("TRUE", "FALSE"))) %>%
+  select(Red, Green, Blue, BT)
+```
+
+```{r 10 fold cross validation models}
+# Set seed
+set.seed(1353)
+
+# Formula and recipe
+formula <- BT ~ Red + Green + Blue
+BT_recipe <- recipe(formula, data = train_data) %>%
+  step_normalize(all_numeric_predictors())
+
+# Specify models
+logreg_spec <- logistic_reg(mode="classification", engine="glm")
+lda_spec <- discrim_linear(mode="classification", engine="MASS")
+qda_spec <- discrim_quad(mode="classification", engine="MASS")
+
+# Define workflows
+logreg_wf <- workflow() %>%
+    add_recipe(BT_recipe) %>%
+    add_model(logreg_spec)
+
+lda_wf <- workflow() %>%
+    add_recipe(BT_recipe) %>%
+    add_model(lda_spec)
+
+qda_wf <- workflow() %>%
+    add_recipe(BT_recipe) %>%
+    add_model(qda_spec)
+
+# Define cross-validation approach
+resamples <- vfold_cv(train_data, v = 10, strata = BT)
+custom_metrics <- metric_set(roc_auc, accuracy)
+cv_control <- control_resamples(save_pred = TRUE)
+```
+
+```{r cross validate}
+#| message: FALSE
+#| warning: FALSE
+# Cross-validate
+logreg_cv <- fit_resamples(logreg_wf, resamples, metrics=custom_metrics, control=cv_control)
+lda_cv <- fit_resamples(lda_wf, resamples, metrics=custom_metrics, control=cv_control)
+qda_cv <- fit_resamples(qda_wf, resamples, metrics=custom_metrics, control=cv_control)
 ```
 
 ```{r}
-holdout_data <- bind_rows(
-  non_not_blue_data %>% select(Lat, Lon, B1, B2, B3, Class),
-  blue_data %>% select(Lat, Lon, B1, B2, B3, Class)
+# Fit to train_data
+final_logreg_fit <- logreg_wf %>% fit(data = train_data)
+final_lda_fit    <- lda_wf %>% fit(data = train_data)
+final_qda_fit    <- qda_wf %>% fit(data = train_data)
+```
+
+```{r cv metrics}
+cv_metrics <- bind_rows(
+    collect_metrics(logreg_cv) %>%
+        mutate(model="Logistic regression"),
+    collect_metrics(lda_cv) %>%
+        mutate(model="LDA"),
+    collect_metrics(qda_cv) %>%
+        mutate(model="QDA")
 )
 
-glimpse(holdout_data)
+cv_metrics %>%
+    select(model, .metric, mean) %>%
+    pivot_wider(names_from=".metric", values_from="mean") %>%
+    knitr::kable(
+      caption="Cross-validation performance metrics.", 
+      digits=3,
+      col.names = c("Model", "Accuracy", "ROC-AUC")
+  ) %>%
+  kableExtra::kable_styling(full_width = FALSE, position = "center")
 ```
-```{r, eval=FALSE}
+
+```{r ROC curves}
+#| fig.cap: ROC curves for Logistic Regression, LDA, and QDA Models.
+bind_rows(
+    collect_predictions(logreg_cv) %>% mutate(model="Logistic regression"),
+    collect_predictions(lda_cv) %>% mutate(model="LDA"),
+    collect_predictions(qda_cv) %>% mutate(model="QDA")
+) %>%
+    group_by(model) %>%
+    roc_curve(truth=BT, .pred_TRUE, event_level="first") %>%
+    autoplot()
+```
+
+```{r utility-functions}
+#| echo: FALSE
+calculate_metrics <- function(model, train, holdout, model_name) {
+  bind_rows(
+    # Accuracy of training set
+    bind_cols(
+      model = model_name,
+      dataset = "train",
+      metrics(model %>% augment(train), truth = BT, estimate = .pred_class)
+    ),
+    # ROC-AUC of training set
+    bind_cols(
+      model = model_name,
+      dataset = "train",
+      roc_auc(model %>% augment(train), BT, .pred_TRUE, event_level = "first")
+    ),
+    # F-measure of training set
+    bind_cols(
+      model = model_name,
+      dataset = "train",
+      f_meas(model %>% augment(train), truth = BT, estimate = .pred_class)
+    ),
+    # Adjusted F-measure (F2) of training set
+    bind_cols(
+      model = model_name,
+      dataset = "train",
+      f_meas(model %>% augment(train), truth = BT, estimate = .pred_class, beta = 2)
+    ),
+    # Sensitivity (Recall) of training set
+    bind_cols(
+      model = model_name,
+      dataset = "train",
+      sens(model %>% augment(train), truth = BT, estimate = .pred_class)
+    ),
+    # Accuracy of holdout set
+    bind_cols(
+      model = model_name,
+      dataset = "holdout",
+      metrics(model %>% augment(holdout), truth = BT, estimate = .pred_class)
+    ),
+    # ROC-AUC of holdout set
+    bind_cols(
+      model = model_name,
+      dataset = "holdout",
+      roc_auc(model %>% augment(holdout), BT, .pred_TRUE, event_level = "first")
+    ),
+    # F-measure of holdout set
+    bind_cols(
+      model = model_name,
+      dataset = "holdout",
+      f_meas(model %>% augment(holdout), truth = BT, estimate = .pred_class)
+    ),
+    # Sensitivity (Recall) of holdout set
+    bind_cols(
+      model = model_name,
+      dataset = "holdout",
+      sens(model %>% augment(holdout), truth = BT, estimate = .pred_class)
+    ),
+    # Adjusted F-measure (F2) of holdout set
+    bind_cols(
+      model = model_name,
+      dataset = "holdout",
+      f_meas(model %>% augment(holdout), truth = BT, estimate = .pred_class, beta = 2)
+    ),
+  )
+}
+```
+
+```{r metrics table}
+all_metrics <- bind_rows(
+    calculate_metrics(final_logreg_fit, train_data, holdout_data, "logreg"),
+    calculate_metrics(final_lda_fit, train_data, holdout_data, "LDA"),
+    calculate_metrics(final_qda_fit, train_data, holdout_data, "QDA"),
+)
+all_metrics <- all_metrics %>% arrange(dataset)
+```
+
+```{r}
+all_metrics %>%
+        pivot_wider(names_from=.metric, values_from=.estimate) %>%
+        select(-.estimator) %>%
+        knitr::kable(
+          caption= "Metrics for the classification models.", 
+          digits=3) %>%
+        kableExtra::kable_styling(full_width=FALSE)
+```
+
+
+```{r}
+threshold_graph <- function(model_cv, model_name) {
+    performance <- probably::threshold_perf(collect_predictions(model_cv), BT, .pred_TRUE,
+        thresholds=seq(0.01, 0.99, 0.01), event_level="first",
+        metrics=metric_set(f_meas, accuracy, sens))
+    max_metrics <- performance %>%
+        drop_na() %>%
+        group_by(.metric) %>%
+        filter(.estimate == max(.estimate))
+    g <- ggplot(performance, aes(x=.threshold, y=.estimate, color=.metric)) +
+        geom_line() +
+        geom_point(data=max_metrics, color="black") +
+        labs(title=model_name, x="Threshold", y="Metric value") +
+        coord_cartesian(ylim=c(0, 1))
+    thresholds <- max_metrics %>%
+        select(.metric, .threshold) %>%
+        deframe()
+    return(list(graph=g, thresholds=thresholds))
+}
+
+visualize_conf_mat <- function(model_cv, thresholds, metric) {
+    threshold <- thresholds[metric]
+    cm <- collect_predictions(logreg_cv) %>%
+        mutate(
+            .pred_class = make_two_class_pred(.pred_TRUE, c("TRUE", "FALSE"), threshold=threshold),
+        ) %>%
+        conf_mat(truth=BT, estimate=.pred_class)
+    autoplot(cm, type="heatmap") +
+        labs(title=sprintf("Threshold %.2f (%s)", threshold, metric))
+}
+
+overview_model <- function(model_cv, model_name) {
+    tg <- threshold_graph(model_cv, model_name)
+    g1 <- visualize_conf_mat(model_cv, tg$thresholds, "accuracy")
+    g2 <- visualize_conf_mat(model_cv, tg$thresholds, "f_meas")
+    g3 <- visualize_conf_mat(model_cv, tg$thresholds, "sens")
+    tg$graph + (g1 / g2 / g3)
+}
+```
+
+
+```{r}
+#| fig.width: 8
+#| fig.height: 12
+#| out.width: 80%
+#| fig.cap: Metrics as a function of model performance
+#| warning: FALSE
+g1 <- overview_model(logreg_cv, "Logistic regression")
+g2 <- overview_model(lda_cv, "LDA")
+g3 <- overview_model(qda_cv, "QDA")
+
+g1 / g2 / g3
+```
+
+```{r}
+# Find optimal thresholds
+threshold_scan <- function(model, data, model_name) {
+  threshold_data <- model %>%
+    augment(data) %>%
+    probably::threshold_perf(
+      truth = BT,
+      estimate = .pred_TRUE,
+      thresholds = seq(0.05, 0.95, 0.01),
+      event_level = "first",
+      metrics = metric_set(sens)
+    )
+  opt_threshold <- threshold_data %>%
+    arrange(desc(.estimate)) %>%
+    slice(1)
+  list(
+    model_name = model_name,
+    threshold = opt_threshold$.threshold,
+    threshold_data = threshold_data,
+    opt_threshold = opt_threshold
+  )
+}
+
+# Apply to final fitted models
+logreg_result <- threshold_scan(final_logreg_fit, holdout_data, "Logistic Regression")
+lda_result    <- threshold_scan(final_lda_fit, holdout_data, "LDA")
+qda_result    <- threshold_scan(final_qda_fit, holdout_data, "QDA")
+
+# Extract the optimal thresholds
+logreg_threshold <- logreg_result$threshold
+lda_threshold    <- lda_result$threshold
+qda_threshold    <- qda_result$threshold
+```
+
+```{r}
+# Plot and combine threshold graphs
+plot_threshold <- function(result) {
+  ggplot(result$threshold_data, aes(x = .threshold, y = .estimate)) +
+    geom_line() +
+    geom_point(data = result$opt_threshold, color = "red", size = 2) +
+    labs(title = result$model_name, x = "Threshold", y = "Sensitivity") +
+    coord_cartesian(ylim = c(0, 1))
+}
+
+g1 <- plot_threshold(logreg_result)
+g2 <- plot_threshold(lda_result)
+g3 <- plot_threshold(qda_result)
+
+# Combine the plots
+g1 + g2 + g3
+```
+
+```{r model-evaluation}
+predict_at_threshold <- function(model, data, threshold) {
+    return(
+        model %>%
+            augment(data) %>%
+            mutate(.pred_class = make_two_class_pred(.pred_TRUE,
+                    c("TRUE", "FALSE"), threshold=threshold)
+            )
+    )
+}
+
+calculate_metrics_at_threshold <- function(model, train, holdout, model_name, threshold) {
+  bind_rows(
+    # Accuracy of training set
+    bind_cols(
+      model = model_name,
+      dataset = "train",
+      threshold = threshold,
+      metrics(predict_at_threshold(model, train, threshold), truth = BT, estimate = .pred_class)
+    ),
+    # ROC-AUC of training set
+    bind_cols(
+      model = model_name,
+      dataset = "train",
+      threshold = threshold,
+      roc_auc(model %>% augment(train), BT, .pred_TRUE, event_level = "first")
+    ),
+    # F-measure of training set
+    bind_cols(
+      model = model_name,
+      dataset = "train",
+      threshold = threshold,
+      f_meas(predict_at_threshold(model, train, threshold), truth = BT, estimate = .pred_class)
+    ),
+    # Sensitivity (Recall) of training set
+    bind_cols(
+      model = model_name,
+      dataset = "train",
+      threshold = threshold,
+      sens(predict_at_threshold(model, train, threshold), truth = BT, estimate = .pred_class)
+    ),
+    # Accuracy of holdout set
+    bind_cols(
+      model = model_name,
+      dataset = "holdout",
+      threshold = threshold,
+      metrics(predict_at_threshold(model, holdout, threshold), truth = BT, estimate = .pred_class)
+    ),
+    # ROC-AUC of holdout set
+    bind_cols(
+      model = model_name,
+      dataset = "holdout",
+      threshold = threshold,
+      roc_auc(model %>% augment(holdout), BT, .pred_TRUE, event_level = "first")
+    ),
+    # F-measure of holdout set
+    bind_cols(
+      model = model_name,
+      dataset = "holdout",
+      threshold = threshold,
+      f_meas(predict_at_threshold(model, holdout, threshold), truth = BT, estimate = .pred_class)
+    ),
+    # Sensitivity (Recall) of holdout set
+    bind_cols(
+      model = model_name,
+      dataset = "holdout",
+      threshold = threshold,
+      sens(predict_at_threshold(model, holdout, threshold), truth = BT, estimate = .pred_class)
+    )
+  )
+}
+
+metrics_at_threshold <- bind_rows(
+    calculate_metrics_at_threshold(final_logreg_fit, train_data, holdout_data, "Logistic regression", logreg_threshold),
+    calculate_metrics_at_threshold(final_lda_fit, train_data, holdout_data, "LDA", lda_threshold),
+    calculate_metrics_at_threshold(final_qda_fit, train_data, holdout_data, "QDA", qda_threshold),
+) %>% arrange(dataset)
+```
+
+```{r}
+metrics_at_threshold %>%
+        pivot_wider(names_from=.metric, values_from=.estimate) %>%
+        select(-.estimator) %>%
+        knitr::kable(
+          caption= "Performance metrics for models at ideal threshold.", 
+          digits=3) %>%
+        kableExtra::kable_styling(full_width=FALSE)
+```
+
+```{, eval=FALSE}
 # Convert for terra
 holdout_data_sp <- holdout_data %>% 
   rename(x = Lon, y = Lat)
@@ -116,23 +475,23 @@ rgb_raster_wgs <- terra::project(rgb_raster, "EPSG:4326", filename = "rgb_raster
 rgb_brick <- raster::brick(rgb_raster_wgs)
 ```
 
-```{r}
+```{,}
 # Create map
-#m <- leaflet() %>%
-#  addTiles() %>%
-#  leafem::addRasterRGB(rgb_brick, r = 1, g = 2, b = 3)
+m <- leaflet() %>%
+  addTiles() %>%
+  leafem::addRasterRGB(rgb_brick, r = 1, g = 2, b = 3)
 
 # Save the map
-#htmlwidgets::saveWidget(m, "interactive_map.html")
+htmlwidgets::saveWidget(m, "interactive_map.html")
 ```
 
-```{r, eval=FALSE}
+```{, eval=FALSE}
 #| message: FALSE
 # Aggregate raster (factor 10)
 rgb_brick_coarse <- raster::aggregate(rgb_brick, fact = 10, fun = mean)
 ```
 
-```{r, eval=FALSE}
+```{, eval=FALSE}
 # Create map
 m <- leaflet() %>%
   addTiles() %>%
@@ -141,7 +500,7 @@ m <- leaflet() %>%
 htmlwidgets::saveWidget(m, "interactive_map_coarse.html")
 ```
 
-```{r}
+```{r, eval=FALSE}
 #| message: FALSE
 image_path <- "orthovnir078_makeshift_villiage1.jpg"
 colordistance::plotPixels(image_path)
@@ -149,7 +508,7 @@ colordistance::plotPixels(image_path)
 H8hist <- colordistance::getImageHist(image_path, bins=c(2, 2, 2))
 ```
 
-```{r}
+```{r, eval=FALSE}
 # Number of pixels
 n <- nrow(holdout_data)
 maxHeight <- 65500
@@ -182,16 +541,16 @@ img_array <- array(c(matrix(r, nrow = height, ncol = width),
 writeJPEG(img_array, target = "holdout_colors.jpg")
 ```
 
-```{r}
+```{r, eval=FALSE}
 image_path <- "holdout_colors.jpg"
 colordistance::plotPixels(image_path)
 ```
 
-```{r}
+```{r, eval=FALSE}
 test_data <- read.csv("HaitiPixels.csv")
 ```
 
-```{r}
+```{r, eval=FALSE}
 # Number of pixels
 n <- nrow(test_data)
 maxHeight <- 65500
@@ -224,7 +583,7 @@ img_array <- array(c(matrix(r, nrow = height, ncol = width),
 writeJPEG(img_array, target = "test_colors.jpg")
 ```
 
-```{r}
+```{r, eval=FALSE}
 image_path <- "test_colors.jpg"
 colordistance::plotPixels(image_path)
 ```
