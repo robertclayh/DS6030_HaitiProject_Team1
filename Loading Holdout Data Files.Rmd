@@ -1,0 +1,122 @@
+---
+title: "Loading_Holdout_DisasterReliefData"
+author: "Virginia Brame"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r, include=FALSE}
+rm(list=ls())
+library(tidymodels)
+library(tidyverse)
+library(dplyr)
+```
+
+```{r}
+colnames <- c("ID", "X", "Y", "Map_X", "Map_Y", "Lat", "Lon", "B1", "B2", "B3")
+
+nonblue_057 <- read.delim("orthovnir057_ROI_NON_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames) %>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="no")
+
+nonblue_067 <- read.delim("orthovnir067_ROI_NOT_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="no")
+
+blue_067 <- read.delim("orthovnir067_ROI_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="yes")
+
+blue_069 <- read.delim("orthovnir069_ROI_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="yes")
+
+nonblue_069 <- read.delim("orthovnir069_ROI_NOT_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="no")
+
+blue_078 <- read.delim("orthovnir078_ROI_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="yes")
+
+nonblue_078 <- read.delim("orthovnir078_ROI_NON_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="no")
+
+holdout_DRH <- bind_rows(nonblue_057, nonblue_067, nonblue_069, nonblue_078, blue_067, blue_069, blue_078) %>% 
+  rename(Red = 'B1', Blue = 'B2', Green = 'B3') %>% 
+  mutate(BlueTarp = factor(BlueTarp))
+
+summary(holdout_DRH)
+levels(holdout_DRH$BlueTarp)
+```
+
+```{r}
+nonblue_057%>% 
+  rename(Red = 'B1', Blue = 'B2', Green = 'B3') %>% 
+  mutate(BlueTarp = factor(BlueTarp))
+nonblue_067%>% 
+  rename(Red = 'B1', Blue = 'B2', Green = 'B3') %>% 
+  mutate(BlueTarp = factor(BlueTarp))
+nonblue_069%>% 
+  rename(Red = 'B1', Blue = 'B2', Green = 'B3') %>% 
+  mutate(BlueTarp = factor(BlueTarp))
+nonblue_078%>% 
+  rename(Red = 'B1', Blue = 'B2', Green = 'B3') %>% 
+  mutate(BlueTarp = factor(BlueTarp))
+
+summary(nonblue_057)
+levels(nonblue_057$BlueTarp)
+summary(nonblue_067)
+levels(nonblue_067$BlueTarp)
+summary(nonblue_069)
+levels(nonblue_069$BlueTarp)
+summary(nonblue_078)
+levels(nonblue_078$BlueTarp)
+```
+Checking the summaries of the individual data files, we see that the mean value for the three color metrics - red, blue, green - are higher in the non_blue 
+```{r}
+summary(blue_067)
+levels(blue_067$BlueTarp)
+summary(blue_069)
+levels(blue_069$BlueTarp)
+summary(blue_078)
+levels(blue_078$BlueTarp)
+```
+```{r}
+
+ggplot(holdout_DRH, aes(x=BlueTarp)) + 
+  geom_histogram(stat = "count", fill = "lightblue")
+```
+```{r}
+write_csv(holdout_DRH, "DisasterRelief_Haiti_HoldoutDS.csv")
+```
+
