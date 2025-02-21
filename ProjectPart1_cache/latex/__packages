@@ -29,8 +29,7 @@ leaflet
 terra
 htmlwidgets
 leafem
-abind
-sf
-stars
 colordistance
 jpeg
+patchwork
+probably
