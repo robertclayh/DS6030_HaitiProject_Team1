@@ -60,13 +60,13 @@ non_blue_files <- c(
 )
 
 blue_data <- map_dfr(blue_files, ~ 
-  read_table(file.path("./HoldoutData", .x), comment = ";", col_names = col_names) %>% 
+  read_table(.x, comment = ";", col_names = col_names) %>% 
     select(Lat, Lon, Red, Green, Blue) %>% 
     mutate(BT = "TRUE")
 )
 
 non_blue_data <- map_dfr(non_blue_files, ~ 
-  read_table(file.path("./HoldoutData", .x), comment = ";", col_names = col_names) %>% 
+  read_table(.x, comment = ";", col_names = col_names) %>% 
     select(Lat, Lon, Red, Green, Blue) %>% 
     mutate(BT = "FALSE")
 )
@@ -165,70 +165,41 @@ bind_rows(
     autoplot()
 ```
 
-```{r utility-functions}
-#| echo: FALSE
+```{r}
+# Create metric set with tweaked f meas
+class_metrics <- metric_set(accuracy, sens, f_meas, 
+                            metric_tweak("f_meas_adj2", f_meas, beta = 2),
+                            metric_tweak("f_meas_adj3", f_meas, beta = 3))
+
+# Define fucntion
+compute_my_metrics <- function(data) {
+  # Compute class metrics
+  res_class <- class_metrics(data, truth = BT, estimate = .pred_class)
+  
+  # Compute roc_auc
+  res_prob <- roc_auc(data, truth = BT, .pred_TRUE, event_level = "first")
+  
+  # Combine
+  bind_rows(res_class, res_prob)
+}
+```
+
+```{r}
 calculate_metrics <- function(model, train, holdout, model_name) {
+  train_aug <- model %>% augment(train)
+  holdout_aug <- model %>% augment(holdout)
+  
   bind_rows(
-    # Accuracy of training set
     bind_cols(
       model = model_name,
       dataset = "train",
-      metrics(model %>% augment(train), truth = BT, estimate = .pred_class)
+      compute_my_metrics(train_aug)
     ),
-    # ROC-AUC of training set
-    bind_cols(
-      model = model_name,
-      dataset = "train",
-      roc_auc(model %>% augment(train), BT, .pred_TRUE, event_level = "first")
-    ),
-    # F-measure of training set
-    bind_cols(
-      model = model_name,
-      dataset = "train",
-      f_meas(model %>% augment(train), truth = BT, estimate = .pred_class)
-    ),
-    # Adjusted F-measure (F2) of training set
-    bind_cols(
-      model = model_name,
-      dataset = "train",
-      f_meas(model %>% augment(train), truth = BT, estimate = .pred_class, beta = 2)
-    ),
-    # Sensitivity (Recall) of training set
-    bind_cols(
-      model = model_name,
-      dataset = "train",
-      sens(model %>% augment(train), truth = BT, estimate = .pred_class)
-    ),
-    # Accuracy of holdout set
     bind_cols(
       model = model_name,
       dataset = "holdout",
-      metrics(model %>% augment(holdout), truth = BT, estimate = .pred_class)
-    ),
-    # ROC-AUC of holdout set
-    bind_cols(
-      model = model_name,
-      dataset = "holdout",
-      roc_auc(model %>% augment(holdout), BT, .pred_TRUE, event_level = "first")
-    ),
-    # F-measure of holdout set
-    bind_cols(
-      model = model_name,
-      dataset = "holdout",
-      f_meas(model %>% augment(holdout), truth = BT, estimate = .pred_class)
-    ),
-    # Sensitivity (Recall) of holdout set
-    bind_cols(
-      model = model_name,
-      dataset = "holdout",
-      sens(model %>% augment(holdout), truth = BT, estimate = .pred_class)
-    ),
-    # Adjusted F-measure (F2) of holdout set
-    bind_cols(
-      model = model_name,
-      dataset = "holdout",
-      f_meas(model %>% augment(holdout), truth = BT, estimate = .pred_class, beta = 2)
-    ),
+      compute_my_metrics(holdout_aug)
+    )
   )
 }
 ```
@@ -242,7 +213,7 @@ all_metrics <- bind_rows(
 all_metrics <- all_metrics %>% arrange(dataset)
 ```
 
-```{r}
+```{r metrics table 2}
 all_metrics %>%
         pivot_wider(names_from=.metric, values_from=.estimate) %>%
         select(-.estimator) %>%
@@ -253,7 +224,7 @@ all_metrics %>%
 ```
 
 
-```{r}
+```{r threshold graphs}
 threshold_graph <- function(model_cv, model_name) {
     performance <- probably::threshold_perf(collect_predictions(model_cv), BT, .pred_TRUE,
         thresholds=seq(0.01, 0.99, 0.01), event_level="first",
@@ -294,7 +265,7 @@ overview_model <- function(model_cv, model_name) {
 ```
 
 
-```{r}
+```{r print threshold graphs}
 #| fig.width: 8
 #| fig.height: 12
 #| out.width: 80%
@@ -307,7 +278,7 @@ g3 <- overview_model(qda_cv, "QDA")
 g1 / g2 / g3
 ```
 
-```{r}
+```{r optimal threshold for one measure}
 # Find optimal thresholds
 threshold_scan <- function(model, data, model_name) {
   threshold_data <- model %>%
@@ -341,7 +312,7 @@ lda_threshold    <- lda_result$threshold
 qda_threshold    <- qda_result$threshold
 ```
 
-```{r}
+```{r combine threshold graphs}
 # Plot and combine threshold graphs
 plot_threshold <- function(result) {
   ggplot(result$threshold_data, aes(x = .threshold, y = .estimate)) +
@@ -359,7 +330,7 @@ g3 <- plot_threshold(qda_result)
 g1 + g2 + g3
 ```
 
-```{r model-evaluation}
+```{r model evaluation}
 predict_at_threshold <- function(model, data, threshold) {
     return(
         model %>%
@@ -438,7 +409,7 @@ metrics_at_threshold <- bind_rows(
 ) %>% arrange(dataset)
 ```
 
-```{r}
+```{r model eval table}
 metrics_at_threshold %>%
         pivot_wider(names_from=.metric, values_from=.estimate) %>%
         select(-.estimator) %>%
