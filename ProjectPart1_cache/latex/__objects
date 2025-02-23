@@ -1,0 +1,24 @@
+unnamed-chunk-1	final_lda_fit	final_logreg_fit	final_qda_fit
+unnamed-chunk-2	
+unnamed-chunk-3	overview_model	threshold_graph	visualize_conf_mat
+unnamed-chunk-4	g1	g2	g3
+unnamed-chunk-5	lda_result	lda_threshold	logreg_result	logreg_threshold	qda_result	qda_threshold	threshold_scan
+unnamed-chunk-6	g1	g2	g3	plot_threshold
+unnamed-chunk-7	
+unnamed-chunk-8	
+unnamed-chunk-9	
+holdout data processing	blue_data	blue_files	col_names	holdout_data	non_blue_data	non_blue_files
+training data processing	train_data
+10 fold cross validation models	BT_recipe	custom_metrics	cv_control	formula	lda_spec	lda_wf	logreg_spec	logreg_wf	qda_spec	qda_wf	resamples
+logreg lda qda metrics	lda_metrics	logreg_metrics	qda_metrics
+ROC curves	
+test set	all_metrics	final_lda_fit	final_logreg_fit	final_qda_fit	lda_accuracy	lda_roc	lda_test_preds	logreg_accuracy	logreg_roc	logreg_test_preds	qda_accuracy	qda_roc	qda_test_preds
+cross validate	lda_cv	logreg_cv	qda_cv
+cv metrics	cv_metrics
+utility-functions	calculate_metrics
+metrics table	all_metrics
+model-evaluation	calculate_metrics_at_threshold	metrics_at_threshold	predict_at_threshold
+unnamed-chunk-10	
+unnamed-chunk-11	
+unnamed-chunk-12	
+unnamed-chunk-13	
