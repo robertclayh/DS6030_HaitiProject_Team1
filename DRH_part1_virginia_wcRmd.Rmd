@@ -1,0 +1,339 @@
+---
+title: "Loading_Holdout_DRH_Part1"
+author: "Virginia Brame"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+rm(list=ls())
+```
+
+```{r, include=FALSE}
+library(tidymodels)
+library(tidyverse)
+library(dplyr)
+library(ggcorrplot)  # corr plot
+library(GGally)  # scatterplot matric
+library(patchwork)
+library(gridExtra)
+library(plotly)
+library(kableExtra)
+```
+
+```{r, include=FALSE}
+# cluster start
+library(doParallel)
+cl <- makePSOCKcluster(parallel::detectCores(logical = FALSE))
+registerDoParallel(cl)
+```
+
+### Loading training dataset
+
+```{r}
+data<-read_csv("HaitiPixels.csv") %>% 
+  rename(BlueTarp = Class ) %>%  
+  glimpse()
+unique(data$BlueTarp)
+```
+
+```{r}
+train_DRH <- data %>% 
+  mutate(
+    BlueTarp = factor(ifelse(BlueTarp == "Blue Tarp", "yes", "no"))) 
+glimpse(train_DRH)
+summary(train_DRH)
+levels(train_DRH$BlueTarp)
+```
+
+### Exploratory data analysis
+
+```{r}
+rgb1 <- train_DRH %>% 
+  ggplot(aes(x=Red, fill=BlueTarp))+
+  geom_density(alpha = 0.5)
+rgb2 <- train_DRH %>% 
+  ggplot(aes(x=Green, fill=BlueTarp))+
+  geom_density(alpha = 0.5)
+rgb3 <- train_DRH %>% 
+  ggplot(aes(x=Blue, fill=BlueTarp))+
+  geom_density(alpha = 0.5)
+
+grid.arrange(rgb1, rgb2, rgb3)
+```
+
+Understanding that:
+-   Blue is 0,0,255
+-   Green is 0,255,0
+-   Red is 255,0,0
+
+I have to think more about how to interpret this.  It's like a model within a model...
+
+```{r}
+plot_ly(train_DRH, x = ~Red, y = ~Green, z = ~Blue, color = ~BlueTarp, 
+        colors = c("orange", "lightblue")) %>%
+  add_markers() %>%
+  layout(title = "Test Data | 3D RGB Plot by BlueTarp",
+         scene = list(xaxis = list(title = 'Red'),
+                      yaxis = list(title = 'Green'),
+                      zaxis = list(title = 'Blue')))
+```
+Here we can clearly see the separation of the two levels of BlueTarp in the training data.  
+
+### Loading holdout .txt files & creating holdout dataset
+
+```{r}
+colnames <- c("ID", "X", "Y", "Map_X", "Map_Y", "Lat", "Lon", "B1", "B2", "B3")
+
+nonblue_057 <- read.delim("orthovnir057_ROI_NON_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames) %>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="no")
+
+nonblue_067 <- read.delim("orthovnir067_ROI_NOT_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="no")
+
+blue_067 <- read.delim("orthovnir067_ROI_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="yes")
+
+blue_069 <- read.delim("orthovnir069_ROI_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="yes")
+
+nonblue_069 <- read.delim("orthovnir069_ROI_NOT_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="no")
+
+blue_078 <- read.delim("orthovnir078_ROI_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="yes")
+
+nonblue_078 <- read.delim("orthovnir078_ROI_NON_Blue_Tarps.txt", 
+                          header = FALSE, 
+                          sep = "", 
+                          fill = TRUE, 
+                          skip = 8, 
+                          col.names = colnames)%>% 
+  select("Lat", "Lon", "B1", "B2", "B3") %>% mutate(BlueTarp="no")
+
+holdout_DRH <- bind_rows(nonblue_057, nonblue_067, nonblue_069, nonblue_078, blue_067, blue_069, blue_078) %>% 
+  rename(Red = 'B1', Blue = 'B2', Green = 'B3') %>% 
+  mutate(BlueTarp = factor(BlueTarp))
+
+str(holdout_DRH$BlueTarp)
+```
+
+```{r}
+
+ggplot(holdout_DRH, aes(x=BlueTarp)) + 
+  geom_histogram(stat = "count", fill = "lightblue")
+```
+
+```{r}
+random_hold_DRH <- holdout_DRH[sample(1:nrow(holdout_DRH), 100000),]
+plot_ly(random_hold_DRH[seq(1, 1000000, by = 10),], x = ~Red, y = ~Green, z = ~Blue, color = ~BlueTarp, 
+        colors = c("grey", "lightblue")) %>%
+  add_markers() %>%
+  layout(title = "Holdout Data | 3D RGB Plot by BlueTarp",
+         scene = list(xaxis = list(title = 'Red'),
+                      yaxis = list(title = 'Green'),
+                      zaxis = list(title = 'Blue')))
+```
+
+### Building models (logreg, LDA, QDA)
+```{r, include=FALSE}
+library(discrim)  # conflicts compromised this library so we reload it
+
+formula <- BlueTarp ~ Red + Green + Blue
+DRH_recipe <- recipe(formula, data=train_DRH)  # normalization not required: RGB
+
+# specify models
+
+logreg_modspec <- logreg_mod <- logistic_reg(mode="classification", engine="glm") 
+lda_modspec <- discrim_linear(mode="classification", engine = "MASS") 
+qda_modspec <- discrim_quad(mode = "classification", engine = "MASS") 
+
+# combine pre-processing --> workflow
+logreg_wf <- workflow() %>% 
+  add_recipe(DRH_recipe) %>% 
+  add_model(logreg_modspec)
+
+lda_wf <- workflow() %>% 
+  add_recipe(DRH_recipe) %>% 
+  add_model(lda_modspec)
+
+qda_wf <- workflow() %>% 
+  add_recipe(DRH_recipe) %>% 
+  add_model(qda_modspec)
+
+# CV (for model selection/eval) --> MSE est. 
+# using stratification b/c of unbalanced response
+# eval: AUC over accuracy, less sens to class imbalance
+
+resamples <- vfold_cv(train_DRH, v=10, strata = BlueTarp)  # stratified; 10-fold CV
+metrics_selected <- metric_set(roc_auc, accuracy)  # AUC
+cv_control <- control_resamples(save_pred = TRUE)  # save preds for ROC
+
+# cv results w/fit_resamples
+logreg_cv <- fit_resamples(logreg_wf, resamples, metrics = metrics_selected, control = cv_control)
+lda_cv <- fit_resamples(lda_wf, resamples, metrics = metrics_selected, control = cv_control)
+qda_cv <- fit_resamples(qda_wf, resamples, metrics = metrics_selected, control = cv_control)
+
+# fitted_models: needed for holdout_predictions
+fitted_logreg <- logreg_wf %>% fit(train_DRH)
+fitted_lda <- lda_wf %>% fit(train_DRH)
+fitted_qda <- qda_wf %>% fit(train_DRH)
+```
+
+```{r}
+logreg_cv
+head(logreg_cv$.predictions, 1)
+```
+
+
+```{r}
+# cv results w/collect_metrics
+# logreg
+
+results_cv_logreg <- collect_metrics(logreg_cv) %>% 
+  select(.metric, mean) %>% 
+  rename(.estimate=mean) %>% 
+  mutate(result="Cross-validation", threshold=0.5)  # setting CV threshold to 0.5 BUT bc of unbalanced - BUT NEED TO TUNE
+
+holdout_preds_logreg <- augment(fitted_logreg, new_data=holdout_DRH)
+holdout_results_logreg <- bind_rows(
+  c(roc_auc(holdout_preds_logreg, BlueTarp, .pred_yes, event_level="second")),
+  c(accuracy(holdout_preds_logreg, BlueTarp, .pred_class))
+) %>% 
+  select(-.estimator) %>% 
+  mutate(result="Holdout Dataset", threshold = 0.5)
+
+
+perf_thresh <- threshold_perf(logreg_cv %>% 
+                                collect_predictions(), 
+                              BlueTarp, 
+                              .pred_yes, 
+                              seq(0.1, 0.9, 0.01), 
+                              event_level="second", 
+                              metrics=metric_set(roc_auc, f_meas, kap))
+
+
+```
+
+
+```{r}
+# cv results w/collect_metrics
+# LDA
+
+results_cv_lda <- collect_metrics(lda_cv) %>% 
+  select(.metric, mean) %>% 
+  rename(.estimate=mean) %>% 
+  mutate(result="Cross-validation", threshold=0.5)  # setting CV threshold to 0.5 BUT bc of unbalanced - BUT NEED TO TUNE
+
+holdout_preds_ldq <- augment(fitted_lda, new_data=holdout_DRH)
+holdout_results_lda <- bind_rows(
+  c(roc_auc(holdout_preds_lda, BlueTarp, .pred_yes, event_level="second")),
+  c(accuracy(holdout_preds_lda, BlueTarp, .pred_class))
+) %>% 
+  select(-.estimator) %>% 
+  mutate(result="Holdout Dataset", threshold = 0.5)
+
+```
+
+```{r}
+# cv results w/collect_metrics
+# QDA
+
+results_cv_qda <- collect_metrics(qda_cv) %>% 
+  select(.metric, mean) %>% 
+  rename(.estimate=mean) %>% 
+  mutate(result="Cross-validation", threshold=0.5)  # setting CV threshold to 0.5 BUT bc of unbalanced - BUT NEED TO TUNE
+
+holdout_preds_qda <- augment(fitted_lda, new_data=holdout_DRH)
+holdout_results_qda <- bind_rows(
+  c(roc_auc(holdout_preds_qda, BlueTarp, .pred_yes, event_level="second")),
+  c(accuracy(holdout_preds_qda, BlueTarp, .pred_class))
+) %>% 
+  select(-.estimator) %>% 
+  mutate(result="Holdout Dataset", threshold = 0.5)
+
+```
+
+
+
+
+
+
+
+### Simple C-V metrics for training data
+
+```{r}
+cv_metrics <- bind_rows(
+  collect_metrics(logreg_cv) %>% 
+    mutate(model="Logistic_Regression"),
+  collect_metrics(lda_cv) %>% 
+    mutate(model = "LDA"),
+  collect_metrics(qda_cv) %>% 
+    mutate(model = "QDA")
+)  
+cv_metrics %>% 
+  select(model, .metric, mean) %>% 
+  pivot_wider(names_from = ".metric", values_from = "mean") %>% 
+  knitr::kable(caption = "Training Data | C-V performance", digits = 3)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+## save does not safeguard data processing. This step seems useless - ask group
+# write_csv(holdout_DRH, "DisasterRelief_Haiti_HoldoutDS.csv")
+```
+
+
+
+
+
+
+### Stop cluster
+```{r}
+# stopCluster(cl)
+# registerDoSEQ()
+```
+
