@@ -167,7 +167,7 @@ lda_cv <- fit_resamples(lda_wf, resamples, metrics=custom_metrics, control=cv_co
 qda_cv <- fit_resamples(qda_wf, resamples, metrics=custom_metrics, control=cv_control)
 ```
 
-```{}
+```{r}
 # Fit to train_data
 final_logreg_fit <- logreg_wf %>% fit(data = train_data)
 final_lda_fit    <- lda_wf %>% fit(data = train_data)
@@ -230,51 +230,52 @@ It is clear that our outcome classes are heavily imbalanced, so we need to adjus
 Use package `probably` to explore the threshold. We define two functions to look at the effect of threshold selection on performance metrics and the associated confusion matrices:
 
 ```{r}
-# Create metric set with tweaked f meas
+# Create metric set with tweaked f_meas (this stays the same)
 class_metrics <- metric_set(accuracy, sens, f_meas, 
                             metric_tweak("f_meas_adj2", f_meas, beta = 2),
                             metric_tweak("f_meas_adj3", f_meas, beta = 3))
 
-# Define fucntion
+# Compute metrics from a tibble of predictions
 compute_my_metrics <- function(data) {
-  # Compute class metrics
   res_class <- class_metrics(data, truth = BT, estimate = .pred_class)
-  
-  # Compute roc_auc
-  res_prob <- roc_auc(data, truth = BT, .pred_TRUE, event_level = "first")
-  
-  # Combine
+  res_prob  <- roc_auc(data, truth = BT, .pred_TRUE, event_level = "first")
   bind_rows(res_class, res_prob)
 }
+
 ```
 
 ```{r}
-calculate_metrics <- function(model, train, holdout, model_name) {
-  train_aug <- model %>% augment(train)
-  holdout_aug <- model %>% augment(holdout)
+calculate_metrics_cv <- function(cv_object, holdout, model_name, workflow, train_data) {
+  # For training, use the cross-validated predictions:
+  train_aug <- collect_predictions(cv_object)
+  
+  # For the holdout set, refit the workflow on the full training data:
+  final_fit   <- workflow %>% fit(train_data)
+  holdout_aug <- augment(final_fit, new_data = holdout)
   
   bind_rows(
     bind_cols(
-      model = model_name,
+      model   = model_name,
       dataset = "train",
       compute_my_metrics(train_aug)
     ),
     bind_cols(
-      model = model_name,
+      model   = model_name,
       dataset = "holdout",
       compute_my_metrics(holdout_aug)
     )
   )
 }
+
 ```
 
 ```{r metrics table}
 all_metrics <- bind_rows(
-    calculate_metrics(final_logreg_fit, train_data, holdout_data, "logreg"),
-    calculate_metrics(final_lda_fit, train_data, holdout_data, "LDA"),
-    calculate_metrics(final_qda_fit, train_data, holdout_data, "QDA"),
-)
-all_metrics <- all_metrics %>% arrange(dataset)
+    calculate_metrics_cv(logreg_cv, holdout_data, "logreg", logreg_wf, train_data),
+    calculate_metrics_cv(lda_cv, holdout_data, "LDA", lda_wf, train_data),
+    calculate_metrics_cv(qda_cv, holdout_data, "QDA", qda_wf, train_data)
+) %>% arrange(dataset)
+
 ```
 
 ```{r metrics table 2}
