@@ -8,38 +8,39 @@ plotly plot	train_data
 makeshift village	
 create jpg holdout	holdout_data
 holdout color plot	
-unnamed-chunk-1	train_data
-unnamed-chunk-2	
-unnamed-chunk-3	holdout_data
-unnamed-chunk-4	
-unnamed-chunk-5	train_data
-unnamed-chunk-6	
-unnamed-chunk-7	train_data
+unnamed-chunk-1	holdout_data
+unnamed-chunk-2	train_data
+unnamed-chunk-3	
+unnamed-chunk-4	holdout_data
+unnamed-chunk-5	
+unnamed-chunk-6	train_data
+unnamed-chunk-7	
 10 fold cross validation models	train_data
 specify models	
 define workflows	BT_recipe	lda_spec	logreg_spec	qda_spec
 cross validation approach	train_data
 cross validate	custom_metrics	cv_control	lda_wf	logreg_wf	qda_wf	resamples
-unnamed-chunk-8	lda_wf	logreg_wf	qda_wf	train_data
+unnamed-chunk-8	train_data
 cv metrics	lda_cv	logreg_cv	qda_cv
 cv-metrics-figure	cv_metrics
 cv-roc-curves-overlay	lda_cv	logreg_cv	qda_cv
-unnamed-chunk-9	
-unnamed-chunk-10	compute_my_metrics
+unnamed-chunk-9	lda_wf	logreg_wf	qda_wf	train_data
+unnamed-chunk-10	
 metrics table	calculate_metrics_cv	holdout_data	lda_cv	lda_wf	logreg_cv	logreg_wf	qda_cv	qda_wf	train_data
 metrics table 2	all_metrics
 threshold graphs 1	logreg_cv
 print threshold graphs	lda_cv	logreg_cv	overview_model	qda_cv
 threshold graphs f_meas	logreg_cv
 print threshold graphs f_meas	lda_cv	logreg_cv	overview_model	qda_cv
-unnamed-chunk-11	lda_cv	lda_wf	logreg_cv	logreg_wf	qda_cv	qda_wf	train_data
+unnamed-chunk-11	compute_my_metrics
 optimal thresholds	
-unnamed-chunk-12	final_lda_fit	final_logreg_fit	final_qda_fit	holdout_data	threshold_scan
-unnamed-chunk-13	lda_result	logreg_result	qda_result
-unnamed-chunk-14	lda_cv	logreg_cv	qda_cv
+unnamed-chunk-12	lda_cv	lda_wf	logreg_cv	logreg_wf	qda_cv	qda_wf	train_data
+unnamed-chunk-13	final_lda_fit	final_logreg_fit	final_qda_fit	holdout_data	threshold_scan
+unnamed-chunk-14	lda_result	logreg_result	qda_result
 combine threshold graphs	lda_result	logreg_result	qda_result
 model evaluation	final_lda_fit	final_logreg_fit	final_qda_fit	holdout_data	lda_holdout_threshold	lda_train_threshold	logreg_holdout_threshold	logreg_train_threshold	qda_holdout_threshold	qda_train_threshold	train_data
 model eval table	metrics_at_threshold
-unnamed-chunk-15	final_lda_fit	final_logreg_fit	final_qda_fit	holdout_data	lda_holdout_threshold	logreg_holdout_threshold	qda_holdout_threshold
-unnamed-chunk-16	lda_cm	logreg_cm	qda_cm
-unnamed-chunk-17	cl
+unnamed-chunk-15	lda_cv	logreg_cv	qda_cv
+unnamed-chunk-16	final_lda_fit	final_logreg_fit	final_qda_fit	holdout_data	lda_holdout_threshold	logreg_holdout_threshold	qda_holdout_threshold
+unnamed-chunk-17	lda_cm	logreg_cm	qda_cm
+unnamed-chunk-18	cl

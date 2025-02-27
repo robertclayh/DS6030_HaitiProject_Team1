@@ -8,9 +8,14 @@ header-includes:
   - \usepackage{float}
 ---
 ```{r setup}
-knitr::opts_chunk$set(echo=TRUE)
-knitr::opts_chunk$set(cache=TRUE, autodep=TRUE)
-knitr::opts_chunk$set(fig.align="center", fig.pos="H")
+knitr::opts_chunk$set(
+  echo = TRUE,
+  cache = TRUE,
+  autodep = TRUE,
+  fig.align = "center",
+  fig.pos = "H",
+  out.width = "100%"
+)
 ```
 
 ## Data (loading, wrangling, EDA)
@@ -155,16 +160,40 @@ total_area_km2
 
 ```{r density plots}
 rgb1 <- train_data %>% 
-  ggplot(aes(x=Red, fill=BT))+
-  geom_density(alpha = 0.5)
-rgb2 <- train_data %>% 
-  ggplot(aes(x=Green, fill=BT))+
-  geom_density(alpha = 0.5)
-rgb3 <- train_data %>% 
-  ggplot(aes(x=Blue, fill=BT))+
-  geom_density(alpha = 0.5)
+  ggplot(aes(x=Red,fill=BT))+ 
+  geom_density(alpha=0.4)+ 
+  scale_fill_manual(values=c("cyan", "tomato"))
 
-grid.arrange(rgb1, rgb2, rgb3)
+rgb2 <- train_data %>% 
+  ggplot(aes(x=Green,fill=BT))+ 
+  geom_density(alpha=0.4)+ 
+  scale_fill_manual(values=c("cyan", "tomato"))
+
+rgb3 <- train_data %>% 
+  ggplot(aes(x=Blue,fill=BT))+ 
+  geom_density(alpha=0.4)+ 
+  scale_fill_manual(values=c("cyan", "tomato"))
+
+grid.arrange(rgb1, rgb2, rgb3, top = "BT assignment by color layer | Training")
+```
+
+```{r}
+rgb4 <- holdout_data %>% 
+  ggplot(aes(x=Red,fill=BT))+ 
+  geom_density(alpha=0.4)+ 
+  scale_fill_manual(values=c("cyan", "tomato"))
+
+rgb5 <- holdout_data %>% 
+  ggplot(aes(x=Green,fill=BT))+ 
+  geom_density(alpha=0.4)+ 
+  scale_fill_manual(values=c("cyan", "tomato"))
+
+rgb6 <- holdout_data %>% 
+  ggplot(aes(x=Blue,fill=BT))+ 
+  geom_density(alpha=0.4)+ 
+  scale_fill_manual(values=c("cyan", "tomato"))
+
+grid.arrange(rgb4, rgb5, rgb6, top = "BT assignment by color layer | Holdout")
 ```
 
 Understanding that:
@@ -365,8 +394,7 @@ Define the preprocessing steps. In this case, we normalize all numeric predictor
 ```{r 10 fold cross validation models}
 # Formula and recipe
 formula <- BT ~ Red + Green + Blue
-BT_recipe <- recipe(formula, data = train_data) %>%
-  step_normalize(all_numeric_predictors())
+BT_recipe <- recipe(formula, data = train_data)
 ```
 
 Specify the three models.
