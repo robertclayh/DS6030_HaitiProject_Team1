@@ -46,6 +46,7 @@ library(probably)
 library(gridExtra)
 library(plotly)
 library(mapview)
+library(farver)
 ```
 
 ### Data loading and wrangling
@@ -93,6 +94,39 @@ holdout_data <- bind_rows(blue_data, non_blue_data) %>%
 train_data <- read_csv("HaitiPixels.csv") %>%
   mutate(BT = factor(if_else(Class == "Blue Tarp", "TRUE", "FALSE"), levels = c("TRUE", "FALSE"))) %>%
   select(Red, Green, Blue, BT)
+```
+
+```{r add CIELab and HSV}
+convert_color_spaces <- function(data) {
+  # Convert RGB to CIELab
+  lab_values <- farver::convert_colour(
+    as.matrix(data[, c("Red", "Green", "Blue")]), 
+    from = "rgb", 
+    to = "lab"
+  )
+  
+  # Convert RGB to HSV
+  hsv_values <- farver::convert_colour(
+    as.matrix(data[, c("Red", "Green", "Blue")]), 
+    from = "rgb", 
+    to = "hsv"
+  )
+  
+  # Convert
+  lab_df <- as.data.frame(lab_values)
+  colnames(lab_df) <- c("Luminance", "a", "b") 
+  hsv_df <- as.data.frame(hsv_values)
+  colnames(hsv_df) <- c("Hue", "Saturation", "Value")
+  
+  # Bind new columns
+  data <- cbind(data, lab_df, hsv_df)
+  
+  return(data)
+}
+
+# Apply function
+train_data <- convert_color_spaces(train_data)
+holdout_data <- convert_color_spaces(holdout_data)
 ```
 
 ### EDA
@@ -391,10 +425,18 @@ I can see that the two outcome classes are extremely unbalanced. I will keep thi
 #### Prepare model workflows
 
 Define the preprocessing steps. In this case, we normalize all numeric predictors.
-```{r 10 fold cross validation models}
-# Formula and recipe
-formula <- BT ~ Red + Green + Blue
-BT_recipe <- recipe(formula, data = train_data)
+```{r set formulas}
+# RGB Model Formula and Recipe
+rgb_formula <- BT ~ Red + Green + Blue
+rgb_recipe <- recipe(rgb_formula, data = train_data)
+
+# CIELab Model Formula and Recipe
+lab_formula <- BT ~ Luminance + a + b
+lab_recipe <- recipe(lab_formula, data = train_data)
+
+# HSV Model Formula and Recipe
+hsv_formula <- BT ~ Hue + Saturation + Value
+hsv_recipe <- recipe(hsv_formula, data = train_data)
 ```
 
 Specify the three models.
@@ -407,18 +449,20 @@ qda_spec <- discrim_quad(mode="classification", engine="MASS")
 
 Combine preprocessing steps and model specification in workflow.
 ```{r define workflows}
-# Define workflows
-logreg_wf <- workflow() %>%
-    add_recipe(BT_recipe) %>%
-    add_model(logreg_spec)
+# RGB Models
+logreg_rgb_wf <- workflow() %>% add_recipe(rgb_recipe) %>% add_model(logreg_spec)
+lda_rgb_wf <- workflow() %>% add_recipe(rgb_recipe) %>% add_model(lda_spec)
+qda_rgb_wf <- workflow() %>% add_recipe(rgb_recipe) %>% add_model(qda_spec)
 
-lda_wf <- workflow() %>%
-    add_recipe(BT_recipe) %>%
-    add_model(lda_spec)
+# CIELab Models
+logreg_lab_wf <- workflow() %>% add_recipe(lab_recipe) %>% add_model(logreg_spec)
+lda_lab_wf <- workflow() %>% add_recipe(lab_recipe) %>% add_model(lda_spec)
+qda_lab_wf <- workflow() %>% add_recipe(lab_recipe) %>% add_model(qda_spec)
 
-qda_wf <- workflow() %>%
-    add_recipe(BT_recipe) %>%
-    add_model(qda_spec)
+# HSV Models
+logreg_hsv_wf <- workflow() %>% add_recipe(hsv_recipe) %>% add_model(logreg_spec)
+lda_hsv_wf <- workflow() %>% add_recipe(hsv_recipe) %>% add_model(lda_spec)
+qda_hsv_wf <- workflow() %>% add_recipe(hsv_recipe) %>% add_model(qda_spec)
 ```
 
 
@@ -441,40 +485,73 @@ Cross-validation
 ```{r cross validate}
 #| message: FALSE
 #| warning: FALSE
-# Cross-validate
-logreg_cv <- fit_resamples(logreg_wf, resamples, metrics=custom_metrics, control=cv_control)
-lda_cv <- fit_resamples(lda_wf, resamples, metrics=custom_metrics, control=cv_control)
-qda_cv <- fit_resamples(qda_wf, resamples, metrics=custom_metrics, control=cv_control)
+
+# Cross-validation for RGB models
+logreg_rgb_cv <- fit_resamples(logreg_rgb_wf, resamples, metrics = custom_metrics, control = cv_control)
+lda_rgb_cv <- fit_resamples(lda_rgb_wf, resamples, metrics = custom_metrics, control = cv_control)
+qda_rgb_cv <- fit_resamples(qda_rgb_wf, resamples, metrics = custom_metrics, control = cv_control)
+
+# Cross-validation for CIELab models
+logreg_lab_cv <- fit_resamples(logreg_lab_wf, resamples, metrics = custom_metrics, control = cv_control)
+lda_lab_cv <- fit_resamples(lda_lab_wf, resamples, metrics = custom_metrics, control = cv_control)
+qda_lab_cv <- fit_resamples(qda_lab_wf, resamples, metrics = custom_metrics, control = cv_control)
+
+# Cross-validation for HSV models
+logreg_hsv_cv <- fit_resamples(logreg_hsv_wf, resamples, metrics = custom_metrics, control = cv_control)
+lda_hsv_cv <- fit_resamples(lda_hsv_wf, resamples, metrics = custom_metrics, control = cv_control)
+qda_hsv_cv <- fit_resamples(qda_hsv_wf, resamples, metrics = custom_metrics, control = cv_control)
 ```
 
 ```{r}
-# Fit to train_data
-final_logreg_fit <- logreg_wf %>% fit(data = train_data)
-final_lda_fit    <- lda_wf %>% fit(data = train_data)
-final_qda_fit    <- qda_wf %>% fit(data = train_data)
+#| message: FALSE
+#| warning: FALSE
+
+# Fit final models on train_data for RGB
+final_logreg_rgb_fit <- logreg_rgb_wf %>% fit(data = train_data)
+final_lda_rgb_fit    <- lda_rgb_wf %>% fit(data = train_data)
+final_qda_rgb_fit    <- qda_rgb_wf %>% fit(data = train_data)
+
+# Fit final models on train_data for CIELab
+final_logreg_lab_fit <- logreg_lab_wf %>% fit(data = train_data)
+final_lda_lab_fit    <- lda_lab_wf %>% fit(data = train_data)
+final_qda_lab_fit    <- qda_lab_wf %>% fit(data = train_data)
+
+# Fit final models on train_data for HSV
+final_logreg_hsv_fit <- logreg_hsv_wf %>% fit(data = train_data)
+final_lda_hsv_fit    <- lda_hsv_wf %>% fit(data = train_data)
+final_qda_hsv_fit    <- qda_hsv_wf %>% fit(data = train_data)
 ```
 
 ### Model performance before threshold selection
 The performance metrics estimated using 10-fold cross-validation.
 ```{r cv metrics}
 cv_metrics <- bind_rows(
-    collect_metrics(logreg_cv) %>%
-        mutate(model="Logistic regression"),
-    collect_metrics(lda_cv) %>%
-        mutate(model="LDA"),
-    collect_metrics(qda_cv) %>%
-        mutate(model="QDA")
+    # RGB models
+    collect_metrics(logreg_rgb_cv) %>% mutate(model = "Logistic Regression (RGB)"),
+    collect_metrics(lda_rgb_cv) %>% mutate(model = "LDA (RGB)"),
+    collect_metrics(qda_rgb_cv) %>% mutate(model = "QDA (RGB)"),
+    
+    # CIELab models
+    collect_metrics(logreg_lab_cv) %>% mutate(model = "Logistic Regression (CIELab)"),
+    collect_metrics(lda_lab_cv) %>% mutate(model = "LDA (CIELab)"),
+    collect_metrics(qda_lab_cv) %>% mutate(model = "QDA (CIELab)"),
+    
+    # HSV models
+    collect_metrics(logreg_hsv_cv) %>% mutate(model = "Logistic Regression (HSV)"),
+    collect_metrics(lda_hsv_cv) %>% mutate(model = "LDA (HSV)"),
+    collect_metrics(qda_hsv_cv) %>% mutate(model = "QDA (HSV)")
 )
 
+# Format and display metrics table
 cv_metrics %>%
     select(model, .metric, mean) %>%
-    pivot_wider(names_from=".metric", values_from="mean") %>%
+    pivot_wider(names_from = .metric, values_from = mean) %>%
     knitr::kable(
-      caption="Cross-validation performance metrics.", 
-      digits=3,
+      caption = "Cross-validation performance metrics.", 
+      digits = 3,
       col.names = c("Model", "Accuracy", "F-measure", "Precision", "ROC-AUC")
-  ) %>%
-  kableExtra::kable_styling(full_width = FALSE, position = "center")
+    ) %>%
+    kableExtra::kable_styling(full_width = FALSE, position = "center")
 ```
 
 Visualization of the same data
@@ -491,17 +568,47 @@ ggplot(cv_metrics, aes(x=mean, y=model, xmin=mean - std_err, xmax=mean + std_err
 
 Cross-validation ROC curves
 ```{r cv-roc-curves-overlay}
-#| fig.width: 8
+#| fig.width: 16
 #| fig.height: 5
-#| fig.cap: Overlay of cross-validation ROC curves
-bind_rows(
-    collect_predictions(logreg_cv) %>% mutate(model="Logistic regression"),
-    collect_predictions(lda_cv) %>% mutate(model="LDA"),
-    collect_predictions(qda_cv) %>% mutate(model="QDA")
+#| fig.cap: Cross-validation ROC curves for each color space
+
+# RGB Models
+rgb_roc <- bind_rows(
+    collect_predictions(logreg_rgb_cv) %>% mutate(model = "Logistic Regression (RGB)"),
+    collect_predictions(lda_rgb_cv) %>% mutate(model = "LDA (RGB)"),
+    collect_predictions(qda_rgb_cv) %>% mutate(model = "QDA (RGB)")
 ) %>%
     group_by(model) %>%
-    roc_curve(truth=BT, .pred_TRUE, event_level="first") %>%
-    autoplot()
+    roc_curve(truth = BT, .pred_TRUE, event_level = "first") %>%
+    autoplot() +
+    ggtitle("ROC Curve - RGB Models") +
+    theme_minimal()
+
+# CIELab Models
+lab_roc <- bind_rows(
+    collect_predictions(logreg_lab_cv) %>% mutate(model = "Logistic Regression (CIELab)"),
+    collect_predictions(lda_lab_cv) %>% mutate(model = "LDA (CIELab)"),
+    collect_predictions(qda_lab_cv) %>% mutate(model = "QDA (CIELab)")
+) %>%
+    group_by(model) %>%
+    roc_curve(truth = BT, .pred_TRUE, event_level = "first") %>%
+    autoplot() +
+    ggtitle("ROC Curve - CIELab Models") +
+    theme_minimal()
+
+# HSV Models
+hsv_roc <- bind_rows(
+    collect_predictions(logreg_hsv_cv) %>% mutate(model = "Logistic Regression (HSV)"),
+    collect_predictions(lda_hsv_cv) %>% mutate(model = "LDA (HSV)"),
+    collect_predictions(qda_hsv_cv) %>% mutate(model = "QDA (HSV)")
+) %>%
+    group_by(model) %>%
+    roc_curve(truth = BT, .pred_TRUE, event_level = "first") %>%
+    autoplot() +
+    ggtitle("ROC Curve - HSV Models") +
+    theme_minimal()
+
+rgb_roc + lab_roc + hsv_roc
 ```
 
 ### Threshold selection/Optimization
@@ -547,12 +654,24 @@ calculate_metrics_cv <- function(cv_object, holdout, model_name, workflow, train
 ```
 
 ```{r metrics table}
+#| warning: FALSE
+#| message: FALSE
 all_metrics <- bind_rows(
-    calculate_metrics_cv(logreg_cv, holdout_data, "logreg", logreg_wf, train_data),
-    calculate_metrics_cv(lda_cv, holdout_data, "LDA", lda_wf, train_data),
-    calculate_metrics_cv(qda_cv, holdout_data, "QDA", qda_wf, train_data)
+    # RGB Models
+    calculate_metrics_cv(logreg_rgb_cv, holdout_data, "Logistic Regression (RGB)", logreg_rgb_wf, train_data),
+    calculate_metrics_cv(lda_rgb_cv, holdout_data, "LDA (RGB)", lda_rgb_wf, train_data),
+    calculate_metrics_cv(qda_rgb_cv, holdout_data, "QDA (RGB)", qda_rgb_wf, train_data),
+    
+    # CIELab Models
+    calculate_metrics_cv(logreg_lab_cv, holdout_data, "Logistic Regression (CIELab)", logreg_lab_wf, train_data),
+    calculate_metrics_cv(lda_lab_cv, holdout_data, "LDA (CIELab)", lda_lab_wf, train_data),
+    calculate_metrics_cv(qda_lab_cv, holdout_data, "QDA (CIELab)", qda_lab_wf, train_data),
+    
+    # HSV Models
+    calculate_metrics_cv(logreg_hsv_cv, holdout_data, "Logistic Regression (HSV)", logreg_hsv_wf, train_data),
+    calculate_metrics_cv(lda_hsv_cv, holdout_data, "LDA (HSV)", lda_hsv_wf, train_data),
+    calculate_metrics_cv(qda_hsv_cv, holdout_data, "QDA (HSV)", qda_hsv_wf, train_data)
 ) %>% arrange(dataset)
-
 ```
 
 ```{r metrics table 2}
@@ -588,7 +707,7 @@ threshold_graph <- function(model_cv, model_name) {
 
 visualize_conf_mat <- function(model_cv, thresholds, metric) {
     threshold <- thresholds[metric]
-    cm <- collect_predictions(logreg_cv) %>%
+    cm <- collect_predictions(model_cv) %>%
         mutate(
             .pred_class = make_two_class_pred(.pred_TRUE, c("TRUE", "FALSE"), threshold=threshold),
         ) %>%
@@ -610,15 +729,41 @@ Notes:
 
 - `f_meas` cannot be calculated for high threshold values. In this case, the function `threshold_perf` returns `NA` for the F-measure. We filter out these values using `drop_na()`.
 
-```{r print threshold graphs}
+```{r print threshold graphs rgb}
 #| fig.width: 8
 #| fig.height: 12
 #| out.width: 80%
 #| fig.cap: Metrics as a function of model performance
 #| warning: FALSE
-g1 <- overview_model(logreg_cv, "Logistic regression")
-g2 <- overview_model(lda_cv, "LDA")
-g3 <- overview_model(qda_cv, "QDA")
+g1 <- overview_model(logreg_rgb_cv, "Logistic regression")
+g2 <- overview_model(lda_rgb_cv, "LDA")
+g3 <- overview_model(qda_rgb_cv, "QDA")
+
+g1 / g2 / g3
+```
+
+```{r print threshold graphs cielab}
+#| fig.width: 8
+#| fig.height: 12
+#| out.width: 80%
+#| fig.cap: Metrics as a function of model performance
+#| warning: FALSE
+g1 <- overview_model(logreg_lab_cv, "Logistic regression")
+g2 <- overview_model(lda_lab_cv, "LDA")
+g3 <- overview_model(qda_lab_cv, "QDA")
+
+g1 / g2 / g3
+```
+
+```{r print threshold graphs hsv}
+#| fig.width: 8
+#| fig.height: 12
+#| out.width: 80%
+#| fig.cap: Metrics as a function of model performance
+#| warning: FALSE
+g1 <- overview_model(logreg_hsv_cv, "Logistic regression")
+g2 <- overview_model(lda_hsv_cv, "LDA")
+g3 <- overview_model(qda_hsv_cv, "QDA")
 
 g1 / g2 / g3
 ```
@@ -649,7 +794,7 @@ threshold_graph <- function(model_cv, model_name) {
 
 visualize_conf_mat <- function(model_cv, thresholds, metric) {
     threshold <- thresholds[metric]
-    cm <- collect_predictions(logreg_cv) %>%
+    cm <- collect_predictions(model_cv) %>%
         mutate(
             .pred_class = make_two_class_pred(.pred_TRUE, c("TRUE", "FALSE"), threshold=threshold),
         ) %>%
@@ -667,15 +812,41 @@ overview_model <- function(model_cv, model_name) {
 }
 ```
 
-```{r print threshold graphs f_meas}
+```{r print threshold graphs f_meas rgb}
 #| fig.width: 8
 #| fig.height: 12
 #| out.width: 80%
 #| fig.cap: Metrics as a function of model performance
 #| warning: FALSE
-g1 <- overview_model(logreg_cv, "Logistic regression")
-g2 <- overview_model(lda_cv, "LDA")
-g3 <- overview_model(qda_cv, "QDA")
+g1 <- overview_model(logreg_rgb_cv, "Logistic regression")
+g2 <- overview_model(lda_rgb_cv, "LDA")
+g3 <- overview_model(qda_rgb_cv, "QDA")
+
+g1 / g2 / g3
+```
+
+```{r print threshold graphs f_meas lab}
+#| fig.width: 8
+#| fig.height: 12
+#| out.width: 80%
+#| fig.cap: Metrics as a function of model performance
+#| warning: FALSE
+g1 <- overview_model(logreg_lab_cv, "Logistic regression")
+g2 <- overview_model(lda_lab_cv, "LDA")
+g3 <- overview_model(qda_lab_cv, "QDA")
+
+g1 / g2 / g3
+```
+
+```{r print threshold graphs f_meas hsv}
+#| fig.width: 8
+#| fig.height: 12
+#| out.width: 80%
+#| fig.cap: Metrics as a function of model performance
+#| warning: FALSE
+g1 <- overview_model(logreg_hsv_cv, "Logistic regression")
+g2 <- overview_model(lda_hsv_cv, "LDA")
+g3 <- overview_model(qda_hsv_cv, "QDA")
 
 g1 / g2 / g3
 ```
@@ -683,12 +854,12 @@ g1 / g2 / g3
 Next, I compared the ROC curves for the logistic regression between the cross-validation predictions and the predictions on the full training data set to see if the logistic regression was overfitting the training data.
 
 ```{r}
-#| fig.width: 10
-#| fig.height: 5
-#| fig.cap: ROC curve comarison between corss-valication and full data set predictions
+#| fig.width: 12
+#| fig.height: 9
+#| fig.cap: ROC curve comparison between cross-validation and full data set predictions
 #| warning: FALSE
 
-# Generate ROC plot
+# Function to generate ROC overlay plots
 get_roc_overlay_autoplot <- function(cv_object, wf, data, model_name) {
   # Fit the full model
   full_fit <- wf %>% fit(data)
@@ -713,13 +884,28 @@ get_roc_overlay_autoplot <- function(cv_object, wf, data, model_name) {
 }
 
 # Generate ROC overlay plots for each model
-p_logreg <- get_roc_overlay_autoplot(logreg_cv, logreg_wf, train_data, "Logistic Regression")
-p_lda    <- get_roc_overlay_autoplot(lda_cv, lda_wf, train_data, "LDA")
-p_qda    <- get_roc_overlay_autoplot(qda_cv, qda_wf, train_data, "QDA")
 
-# Patchwork the three plots into one graphic
-combined_roc <- p_logreg + p_lda + p_qda + 
-  plot_annotation(title = "Overlay of ROC Curves (CV vs. Full Data Predictions)")
+## RGB Models
+p_logreg_rgb <- get_roc_overlay_autoplot(logreg_rgb_cv, logreg_rgb_wf, train_data, "Logistic Regression (RGB)")
+p_lda_rgb    <- get_roc_overlay_autoplot(lda_rgb_cv, lda_rgb_wf, train_data, "LDA (RGB)")
+p_qda_rgb    <- get_roc_overlay_autoplot(qda_rgb_cv, qda_rgb_wf, train_data, "QDA (RGB)")
+
+## CIELab Models
+p_logreg_lab <- get_roc_overlay_autoplot(logreg_lab_cv, logreg_lab_wf, train_data, "Logistic Regression (CIELab)")
+p_lda_lab    <- get_roc_overlay_autoplot(lda_lab_cv, lda_lab_wf, train_data, "LDA (CIELab)")
+p_qda_lab    <- get_roc_overlay_autoplot(qda_lab_cv, qda_lab_wf, train_data, "QDA (CIELab)")
+
+## HSV Models
+p_logreg_hsv <- get_roc_overlay_autoplot(logreg_hsv_cv, logreg_hsv_wf, train_data, "Logistic Regression (HSV)")
+p_lda_hsv    <- get_roc_overlay_autoplot(lda_hsv_cv, lda_hsv_wf, train_data, "LDA (HSV)")
+p_qda_hsv    <- get_roc_overlay_autoplot(qda_hsv_cv, qda_hsv_wf, train_data, "QDA (HSV)")
+
+# Combine plots
+combined_roc <- (p_logreg_rgb + p_lda_rgb + p_qda_rgb) / 
+                (p_logreg_lab + p_lda_lab + p_qda_lab) / 
+                (p_logreg_hsv + p_lda_hsv + p_qda_hsv) +
+                plot_annotation(title = "Overlay of ROC Curves (CV vs. Full Data Predictions)")
+
 combined_roc
 ```
 
@@ -751,17 +937,33 @@ threshold_scan <- function(model, data, model_name) {
 ```
 
 ```{r}
-# Fitted models
-logreg_result <- threshold_scan(final_logreg_fit, holdout_data, "Logistic Regression")
-lda_result    <- threshold_scan(final_lda_fit, holdout_data, "LDA")
-qda_result    <- threshold_scan(final_qda_fit, holdout_data, "QDA")
+# Threshold scanning
+logreg_rgb_result <- threshold_scan(final_logreg_rgb_fit, holdout_data, "Logistic Regression (RGB)")
+lda_rgb_result    <- threshold_scan(final_lda_rgb_fit, holdout_data, "LDA (RGB)")
+qda_rgb_result    <- threshold_scan(final_qda_rgb_fit, holdout_data, "QDA (RGB)")
+
+logreg_lab_result <- threshold_scan(final_logreg_lab_fit, holdout_data, "Logistic Regression (CIELab)")
+lda_lab_result    <- threshold_scan(final_lda_lab_fit, holdout_data, "LDA (CIELab)")
+qda_lab_result    <- threshold_scan(final_qda_lab_fit, holdout_data, "QDA (CIELab)")
+
+logreg_hsv_result <- threshold_scan(final_logreg_hsv_fit, holdout_data, "Logistic Regression (HSV)")
+lda_hsv_result    <- threshold_scan(final_lda_hsv_fit, holdout_data, "LDA (HSV)")
+qda_hsv_result    <- threshold_scan(final_qda_hsv_fit, holdout_data, "QDA (HSV)")
 ```
 
 ```{r}
 # Optimal thresholds
-logreg_holdout_threshold <- logreg_result$threshold
-lda_holdout_threshold    <- lda_result$threshold
-qda_holdout_threshold    <- qda_result$threshold
+logreg_rgb_holdout_threshold <- logreg_rgb_result$threshold
+lda_rgb_holdout_threshold    <- lda_rgb_result$threshold
+qda_rgb_holdout_threshold    <- qda_rgb_result$threshold
+
+logreg_lab_holdout_threshold <- logreg_lab_result$threshold
+lda_lab_holdout_threshold    <- lda_lab_result$threshold
+qda_lab_holdout_threshold    <- qda_lab_result$threshold
+
+logreg_hsv_holdout_threshold <- logreg_hsv_result$threshold
+lda_hsv_holdout_threshold    <- lda_hsv_result$threshold
+qda_hsv_holdout_threshold    <- qda_hsv_result$threshold
 ```
 
 ```{r}
@@ -784,19 +986,48 @@ threshold_scan_cv <- function(cv_obj, model_name) {
   )
 }
 
-# CV objects
-logreg_train_result <- threshold_scan_cv(logreg_cv, "Logistic Regression")
-lda_train_result    <- threshold_scan_cv(lda_cv, "LDA")
-qda_train_result    <- threshold_scan_cv(qda_cv, "QDA")
+# Compute thresholds
 
-# Optimal thresholds
-logreg_train_threshold <- logreg_train_result$threshold
-lda_train_threshold    <- lda_train_result$threshold
-qda_train_threshold    <- qda_train_result$threshold
+## RGB Models
+logreg_rgb_train_result <- threshold_scan_cv(logreg_rgb_cv, "Logistic Regression (RGB)")
+lda_rgb_train_result    <- threshold_scan_cv(lda_rgb_cv, "LDA (RGB)")
+qda_rgb_train_result    <- threshold_scan_cv(qda_rgb_cv, "QDA (RGB)")
+
+## CIELab Models
+logreg_lab_train_result <- threshold_scan_cv(logreg_lab_cv, "Logistic Regression (CIELab)")
+lda_lab_train_result    <- threshold_scan_cv(lda_lab_cv, "LDA (CIELab)")
+qda_lab_train_result    <- threshold_scan_cv(qda_lab_cv, "QDA (CIELab)")
+
+## HSV Models
+logreg_hsv_train_result <- threshold_scan_cv(logreg_hsv_cv, "Logistic Regression (HSV)")
+lda_hsv_train_result    <- threshold_scan_cv(lda_hsv_cv, "LDA (HSV)")
+qda_hsv_train_result    <- threshold_scan_cv(qda_hsv_cv, "QDA (HSV)")
+
+# Extract optimal thresholds
+
+## RGB
+logreg_rgb_train_threshold <- logreg_rgb_train_result$threshold
+lda_rgb_train_threshold    <- lda_rgb_train_result$threshold
+qda_rgb_train_threshold    <- qda_rgb_train_result$threshold
+
+## CIELab
+logreg_lab_train_threshold <- logreg_lab_train_result$threshold
+lda_lab_train_threshold    <- lda_lab_train_result$threshold
+qda_lab_train_threshold    <- qda_lab_train_result$threshold
+
+## HSV
+logreg_hsv_train_threshold <- logreg_hsv_train_result$threshold
+lda_hsv_train_threshold    <- lda_hsv_train_result$threshold
+qda_hsv_train_threshold    <- qda_hsv_train_result$threshold
 ```
 
 ```{r combine threshold graphs}
-# Plot and combine threshold graphs
+#| fig.width: 12
+#| fig.height: 9
+#| fig.cap: F-Measure by threshold for each model and color space
+#| warning: FALSE
+
+# Function to plot threshold performance
 plot_threshold <- function(result) {
   ggplot(result$threshold_data, aes(x = .threshold, y = .estimate)) +
     geom_line() +
@@ -805,12 +1036,28 @@ plot_threshold <- function(result) {
     coord_cartesian(ylim = c(0, 1))
 }
 
-g1 <- plot_threshold(logreg_result)
-g2 <- plot_threshold(lda_result)
-g3 <- plot_threshold(qda_result)
+## RGB
+g_logreg_rgb <- plot_threshold(logreg_rgb_result)
+g_lda_rgb    <- plot_threshold(lda_rgb_result)
+g_qda_rgb    <- plot_threshold(qda_rgb_result)
 
-# Combine the plots
-g1 + g2 + g3
+## CIELab
+g_logreg_lab <- plot_threshold(logreg_lab_result)
+g_lda_lab    <- plot_threshold(lda_lab_result)
+g_qda_lab    <- plot_threshold(qda_lab_result)
+
+## HSV
+g_logreg_hsv <- plot_threshold(logreg_hsv_result)
+g_lda_hsv    <- plot_threshold(lda_hsv_result)
+g_qda_hsv    <- plot_threshold(qda_hsv_result)
+
+# Combine plots
+combined_thresholds <- (g_logreg_rgb + g_lda_rgb + g_qda_rgb) /
+                       (g_logreg_lab + g_lda_lab + g_qda_lab) /
+                       (g_logreg_hsv + g_lda_hsv + g_qda_hsv) +
+                       plot_annotation(title = "Threshold Performance (F-Measure) Across Color Spaces")
+
+combined_thresholds
 ```
 
 ```{r model evaluation}
@@ -878,9 +1125,29 @@ calculate_metrics_at_threshold <- function(model, train, holdout, model_name, tr
 }
 
 metrics_at_threshold <- bind_rows(
-    calculate_metrics_at_threshold(final_logreg_fit, train_data, holdout_data, "Logistic regression", logreg_train_threshold, logreg_holdout_threshold),
-    calculate_metrics_at_threshold(final_lda_fit, train_data, holdout_data, "LDA", lda_train_threshold, lda_holdout_threshold),
-    calculate_metrics_at_threshold(final_qda_fit, train_data, holdout_data, "QDA", qda_train_threshold, qda_holdout_threshold)
+    # RGB Models
+    calculate_metrics_at_threshold(final_logreg_rgb_fit, train_data, holdout_data, 
+                                   "Logistic Regression (RGB)", logreg_rgb_train_threshold, logreg_rgb_holdout_threshold),
+    calculate_metrics_at_threshold(final_lda_rgb_fit, train_data, holdout_data, 
+                                   "LDA (RGB)", lda_rgb_train_threshold, lda_rgb_holdout_threshold),
+    calculate_metrics_at_threshold(final_qda_rgb_fit, train_data, holdout_data, 
+                                   "QDA (RGB)", qda_rgb_train_threshold, qda_rgb_holdout_threshold),
+
+    # CIELab Models
+    calculate_metrics_at_threshold(final_logreg_lab_fit, train_data, holdout_data, 
+                                   "Logistic Regression (CIELab)", logreg_lab_train_threshold, logreg_lab_holdout_threshold),
+    calculate_metrics_at_threshold(final_lda_lab_fit, train_data, holdout_data, 
+                                   "LDA (CIELab)", lda_lab_train_threshold, lda_lab_holdout_threshold),
+    calculate_metrics_at_threshold(final_qda_lab_fit, train_data, holdout_data, 
+                                   "QDA (CIELab)", qda_lab_train_threshold, qda_lab_holdout_threshold),
+
+    # HSV Models
+    calculate_metrics_at_threshold(final_logreg_hsv_fit, train_data, holdout_data, 
+                                   "Logistic Regression (HSV)", logreg_hsv_train_threshold, logreg_hsv_holdout_threshold),
+    calculate_metrics_at_threshold(final_lda_hsv_fit, train_data, holdout_data, 
+                                   "LDA (HSV)", lda_hsv_train_threshold, lda_hsv_holdout_threshold),
+    calculate_metrics_at_threshold(final_qda_hsv_fit, train_data, holdout_data, 
+                                   "QDA (HSV)", qda_hsv_train_threshold, qda_hsv_holdout_threshold)
 ) %>% arrange(dataset)
 ```
 
@@ -895,6 +1162,7 @@ metrics_at_threshold %>%
 ```
 
 ```{r}
+# Function to generate confusion matrix plots
 visualize_conf_mat_holdout <- function(model, data, threshold, metric_label) {
   cm <- model %>%
     augment(data) %>%
@@ -905,22 +1173,104 @@ visualize_conf_mat_holdout <- function(model, data, threshold, metric_label) {
     labs(title = sprintf("Threshold %.2f (%s)", threshold, metric_label))
 }
 
+# Function to generate overview confusion matrix plots
 overview_model_holdout <- function(model, model_name, threshold) {
   cm_plot <- visualize_conf_mat_holdout(model, holdout_data, threshold, "Holdout")
   cm_plot + labs(title = sprintf("%s \n (Threshold = %.2f)", model_name, threshold))
 }
 
-logreg_cm <- overview_model_holdout(final_logreg_fit, "Logistic Regression", logreg_holdout_threshold)
-lda_cm    <- overview_model_holdout(final_lda_fit, "LDA", lda_holdout_threshold)
-qda_cm    <- overview_model_holdout(final_qda_fit, "QDA", qda_holdout_threshold)
+## RGB Models
+logreg_cm_rgb <- overview_model_holdout(final_logreg_rgb_fit, "Logistic Regression (RGB)", logreg_rgb_holdout_threshold)
+lda_cm_rgb    <- overview_model_holdout(final_lda_rgb_fit, "LDA (RGB)", lda_rgb_holdout_threshold)
+qda_cm_rgb    <- overview_model_holdout(final_qda_rgb_fit, "QDA (RGB)", qda_rgb_holdout_threshold)
+
+## CIELab Models
+logreg_cm_lab <- overview_model_holdout(final_logreg_lab_fit, "Logistic Regression (CIELab)", logreg_lab_holdout_threshold)
+lda_cm_lab    <- overview_model_holdout(final_lda_lab_fit, "LDA (CIELab)", lda_lab_holdout_threshold)
+qda_cm_lab    <- overview_model_holdout(final_qda_lab_fit, "QDA (CIELab)", qda_lab_holdout_threshold)
+
+## HSV Models
+logreg_cm_hsv <- overview_model_holdout(final_logreg_hsv_fit, "Logistic Regression (HSV)", logreg_hsv_holdout_threshold)
+lda_cm_hsv    <- overview_model_holdout(final_lda_hsv_fit, "LDA (HSV)", lda_hsv_holdout_threshold)
+qda_cm_hsv    <- overview_model_holdout(final_qda_hsv_fit, "QDA (HSV)", qda_hsv_holdout_threshold)
 ```
 
 ```{r}
-#| fig.width: 10
-#| fig.height: 2
-#| fig.cap: ROC curve comarison between corss-valication and full data set predictions
+#| fig.width: 12
+#| fig.height: 9
+#| fig.cap: Holdout Set Confusion Matrices by Color Space
 #| warning: FALSE
-logreg_cm + lda_cm + qda_cm
+# Combine plots into a 3-row
+combined_cm <- (logreg_cm_rgb + lda_cm_rgb + qda_cm_rgb) /
+               (logreg_cm_lab + lda_cm_lab + qda_cm_lab) /
+               (logreg_cm_hsv + lda_cm_hsv + qda_cm_hsv) +
+               plot_annotation(title = "Holdout Set Confusion Matrices Across Color Spaces")
+
+# Display the combined plot
+combined_cm
+```
+
+```{r optimal thresholds}
+# Find optimal thresholds
+threshold_fine_scan <- function(model, data, model_name) {
+  threshold_data <- model %>%
+    augment(data) %>%
+    probably::threshold_perf(
+      truth = BT,
+      estimate = .pred_TRUE,
+      thresholds = seq(0.99, 1, 0.001),
+      event_level = "first",
+      metrics = metric_set(f_meas)
+    )
+  opt_threshold <- threshold_data %>%
+    drop_na() %>%
+    arrange(desc(.estimate)) %>%
+    slice(1)
+  list(
+    threshold = opt_threshold$.threshold,
+    threshold_data = threshold_data,
+    opt_threshold = opt_threshold,
+    model_name = model_name
+  )
+}
+```
+
+```{r}
+#| warning: FALSE
+#| message: FALSE
+# Threshold scanning
+logreg_rgb_fine_result <- threshold_fine_scan(final_logreg_rgb_fit, holdout_data, "Logistic Regression (RGB)")
+
+logreg_lab_fine_result <- threshold_fine_scan(final_logreg_lab_fit, holdout_data, "Logistic Regression (CIELab)")
+```
+
+```{r}
+# Optimal thresholds
+logreg_rgb_fine_holdout_threshold <- logreg_rgb_fine_result$threshold
+
+logreg_lab_fine_holdout_threshold <- logreg_lab_fine_result$threshold
+```
+
+```{r}
+metrics_at_threshold <- bind_rows(
+    # RGB Models
+    calculate_metrics_at_threshold(final_logreg_rgb_fit, train_data, holdout_data, 
+                                   "Logistic Regression (RGB)", logreg_rgb_train_threshold, logreg_rgb_fine_holdout_threshold),
+
+    # CIELab Models
+    calculate_metrics_at_threshold(final_logreg_lab_fit, train_data, holdout_data, 
+                                   "Logistic Regression (CIELab)", logreg_lab_train_threshold, logreg_lab_fine_holdout_threshold)
+) %>% arrange(dataset)
+```
+
+```{r model eval table fine}
+metrics_at_threshold %>%
+        pivot_wider(names_from=.metric, values_from=.estimate) %>%
+        select(-.estimator) %>%
+        knitr::kable(
+          caption= "Performance metrics for models at ideal threshold.", 
+          digits=3) %>%
+        kableExtra::kable_styling(full_width=FALSE)
 ```
 
 ```{r}
