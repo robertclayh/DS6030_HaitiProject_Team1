@@ -17,30 +17,67 @@ unnamed-chunk-6	train_data
 unnamed-chunk-7	
 10 fold cross validation models	train_data
 specify models	
-define workflows	BT_recipe	lda_spec	logreg_spec	qda_spec
+define workflows	hsv_recipe	lab_recipe	lda_spec	logreg_spec	qda_spec	rgb_recipe
 cross validation approach	train_data
-cross validate	custom_metrics	cv_control	lda_wf	logreg_wf	qda_wf	resamples
+cross validate	custom_metrics	cv_control	lda_hsv_wf	lda_lab_wf	lda_rgb_wf	logreg_hsv_wf	logreg_lab_wf	logreg_rgb_wf	qda_hsv_wf	qda_lab_wf	qda_rgb_wf	resamples
 unnamed-chunk-8	train_data
-cv metrics	lda_cv	logreg_cv	qda_cv
+cv metrics	lda_hsv_cv	lda_lab_cv	lda_rgb_cv	logreg_hsv_cv	logreg_lab_cv	logreg_rgb_cv	qda_hsv_cv	qda_lab_cv	qda_rgb_cv
 cv-metrics-figure	cv_metrics
-cv-roc-curves-overlay	lda_cv	logreg_cv	qda_cv
+cv-roc-curves-overlay	lda_hsv_cv	lda_lab_cv	lda_rgb_cv	logreg_hsv_cv	logreg_lab_cv	logreg_rgb_cv	qda_hsv_cv	qda_lab_cv	qda_rgb_cv
 unnamed-chunk-9	lda_wf	logreg_wf	qda_wf	train_data
 unnamed-chunk-10	
 metrics table	calculate_metrics_cv	holdout_data	lda_cv	lda_wf	logreg_cv	logreg_wf	qda_cv	qda_wf	train_data
 metrics table 2	all_metrics
-threshold graphs 1	logreg_cv
+threshold graphs 1	
 print threshold graphs	lda_cv	logreg_cv	overview_model	qda_cv
-threshold graphs f_meas	logreg_cv
+threshold graphs f_meas	
 print threshold graphs f_meas	lda_cv	logreg_cv	overview_model	qda_cv
 unnamed-chunk-11	compute_my_metrics
 optimal thresholds	
 unnamed-chunk-12	lda_cv	lda_wf	logreg_cv	logreg_wf	qda_cv	qda_wf	train_data
 unnamed-chunk-13	final_lda_fit	final_logreg_fit	final_qda_fit	holdout_data	threshold_scan
 unnamed-chunk-14	lda_result	logreg_result	qda_result
-combine threshold graphs	lda_result	logreg_result	qda_result
+combine threshold graphs	lda_hsv_result	lda_lab_result	lda_rgb_result	logreg_hsv_result	logreg_lab_result	logreg_rgb_result	qda_hsv_result	qda_lab_result	qda_rgb_result
 model evaluation	final_lda_fit	final_logreg_fit	final_qda_fit	holdout_data	lda_holdout_threshold	lda_train_threshold	logreg_holdout_threshold	logreg_train_threshold	qda_holdout_threshold	qda_train_threshold	train_data
 model eval table	metrics_at_threshold
 unnamed-chunk-15	lda_cv	logreg_cv	qda_cv
 unnamed-chunk-16	final_lda_fit	final_logreg_fit	final_qda_fit	holdout_data	lda_holdout_threshold	logreg_holdout_threshold	qda_holdout_threshold
 unnamed-chunk-17	lda_cm	logreg_cm	qda_cm
 unnamed-chunk-18	cl
+add CIELab and HSV	
+density plots 2	holdout_data
+pixel prep	train_data
+plot train colors	
+holdout data jpg	holdout_data
+holdout blue	
+train blue jpg	train_data
+train blue	
+dist of BT	train_data
+9 models	
+set formulas	train_data
+fit final models on train	lda_hsv_wf	lda_lab_wf	lda_rgb_wf	logreg_hsv_wf	logreg_lab_wf	logreg_rgb_wf	qda_hsv_wf	qda_lab_wf	qda_rgb_wf	train_data
+print threshold graphs rgb	lda_rgb_cv	logreg_rgb_cv	overview_model	qda_rgb_cv
+print threshold graphs cielab	lda_lab_cv	logreg_lab_cv	overview_model	qda_lab_cv
+print threshold graphs hsv	lda_hsv_cv	logreg_hsv_cv	overview_model	qda_hsv_cv
+print threshold graphs f_meas rgb	lda_rgb_cv	logreg_rgb_cv	overview_model	qda_rgb_cv
+print threshold graphs f_meas lab	lda_lab_cv	logreg_lab_cv	overview_model	qda_lab_cv
+print threshold graphs f_meas hsv	lda_hsv_cv	logreg_hsv_cv	overview_model	qda_hsv_cv
+roc overlay plots check cv full	lda_hsv_cv	lda_hsv_wf	lda_lab_cv	lda_lab_wf	lda_rgb_cv	lda_rgb_wf	logreg_hsv_cv	logreg_hsv_wf	logreg_lab_cv	logreg_lab_wf	logreg_rgb_cv	logreg_rgb_wf	qda_hsv_cv	qda_hsv_wf	qda_lab_cv	qda_lab_wf	qda_rgb_cv	qda_rgb_wf	train_data
+compare roc-auc cv and full train	lda_hsv_cv	lda_hsv_wf	lda_lab_cv	lda_lab_wf	lda_rgb_cv	lda_rgb_wf	logreg_hsv_cv	logreg_hsv_wf	logreg_lab_cv	logreg_lab_wf	logreg_rgb_cv	logreg_rgb_wf	qda_hsv_cv	qda_hsv_wf	qda_lab_cv	qda_lab_wf	qda_rgb_cv	qda_rgb_wf	train_data
+scan threshold holdout	final_lda_hsv_fit	final_lda_lab_fit	final_lda_rgb_fit	final_logreg_hsv_fit	final_logreg_lab_fit	final_logreg_rgb_fit	final_qda_hsv_fit	final_qda_lab_fit	final_qda_rgb_fit	holdout_data	threshold_scan
+optimal thresholds set	lda_hsv_result	lda_lab_result	lda_rgb_result	logreg_hsv_result	logreg_lab_result	logreg_rgb_result	qda_hsv_result	qda_lab_result	qda_rgb_result
+scan threshold cv	lda_hsv_cv	lda_lab_cv	lda_rgb_cv	logreg_hsv_cv	logreg_lab_cv	logreg_rgb_cv	qda_hsv_cv	qda_lab_cv	qda_rgb_cv
+model evaluation functions	
+metrics get	calculate_metrics_at_threshold	final_lda_hsv_fit	final_lda_lab_fit	final_lda_rgb_fit	final_logreg_hsv_fit	final_logreg_lab_fit	final_logreg_rgb_fit	final_qda_hsv_fit	final_qda_lab_fit	final_qda_rgb_fit	holdout_data	lda_hsv_holdout_threshold	lda_hsv_train_threshold	lda_lab_holdout_threshold	lda_lab_train_threshold	lda_rgb_holdout_threshold	lda_rgb_train_threshold	logreg_hsv_holdout_threshold	logreg_hsv_train_threshold	logreg_lab_holdout_threshold	logreg_lab_train_threshold	logreg_rgb_holdout_threshold	logreg_rgb_train_threshold	qda_hsv_holdout_threshold	qda_hsv_train_threshold	qda_lab_holdout_threshold	qda_lab_train_threshold	qda_rgb_holdout_threshold	qda_rgb_train_threshold	train_data
+conf matrix plots	final_lda_hsv_fit	final_lda_lab_fit	final_lda_rgb_fit	final_logreg_hsv_fit	final_logreg_lab_fit	final_logreg_rgb_fit	final_qda_hsv_fit	final_qda_lab_fit	final_qda_rgb_fit	holdout_data	lda_hsv_holdout_threshold	lda_lab_holdout_threshold	lda_rgb_holdout_threshold	logreg_hsv_holdout_threshold	logreg_lab_holdout_threshold	logreg_rgb_holdout_threshold	qda_hsv_holdout_threshold	qda_lab_holdout_threshold	qda_rgb_holdout_threshold
+show conf matrix plots	lda_cm_hsv	lda_cm_lab	lda_cm_rgb	logreg_cm_hsv	logreg_cm_lab	logreg_cm_rgb	qda_cm_hsv	qda_cm_lab	qda_cm_rgb
+optimal thresholds fine	
+get opt thresholds fine	final_logreg_lab_fit	final_logreg_rgb_fit	holdout_data	threshold_fine_scan
+save opt thresholds fine	logreg_lab_fine_result	logreg_rgb_fine_result
+metric opt thres fine	calculate_metrics_at_threshold	final_logreg_lab_fit	final_logreg_rgb_fit	holdout_data	logreg_lab_fine_holdout_threshold	logreg_lab_train_threshold	logreg_rgb_fine_holdout_threshold	logreg_rgb_train_threshold	train_data
+model eval table fine	metrics_at_fine_threshold
+final conf matrix fine	final_logreg_lab_fit	final_logreg_rgb_fit	logreg_lab_fine_holdout_threshold	logreg_rgb_fine_holdout_threshold	overview_model_holdout
+stop cluster	cl
+optimal thresholds insert numbers	
+echo true	
+load previous scan results	
