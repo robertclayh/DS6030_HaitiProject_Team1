@@ -1573,6 +1573,129 @@ combined_cm <- logreg_cm_rgb + logreg_cm_lab +
 combined_cm
 ```
 
+```{r}
+# Function to predict class labels at optimal threshold
+predict_at_threshold_raster <- function(model, data, threshold) {
+  predictions <- model %>%
+    augment(data) %>%
+    mutate(.pred_class = make_two_class_pred(.pred_TRUE, c("TRUE", "FALSE"), threshold = threshold))
+  return(predictions)
+}
+
+# Apply model predictions to holdout data
+logreg_rgb_predictions <- predict_at_threshold_raster(final_logreg_rgb_fit, holdout_data, logreg_rgb_fine_holdout_threshold)
+logreg_lab_predictions <- predict_at_threshold_raster(final_logreg_lab_fit, holdout_data, logreg_lab_fine_holdout_threshold)
+```
+
+```{r}
+# Convert to spatial vector
+logreg_rgb_vect <- vect(logreg_rgb_predictions, geom = c("Lon", "Lat"), crs = "EPSG:4326")
+logreg_lab_vect <- vect(logreg_lab_predictions, geom = c("Lon", "Lat"), crs = "EPSG:4326")
+
+# Reproject to UTM (for consistent spatial operations)
+logreg_rgb_utm <- project(logreg_rgb_vect, "EPSG:32618")
+logreg_lab_utm <- project(logreg_lab_vect, "EPSG:32618")
+```
+
+```{r}
+# Create empty raster
+raster_template <- rast(ext(logreg_rgb_utm), resolution = 0.1, crs = "EPSG:32618")
+
+# Rasterize 
+r_rgb <- rasterize(logreg_rgb_utm, raster_template, field = ".pred_class")
+r_lab <- rasterize(logreg_lab_utm, raster_template, field = ".pred_class")
+
+# Convert to integer
+r_rgb <- round(r_rgb)
+r_lab <- round(r_lab)
+```
+```{r}
+# 3×3 moving window
+window_size <- matrix(1, nrow = 3, ncol = 3)
+
+# Apply mode filter
+smoothed_rgb <- focal(r_rgb, w = window_size, fun = modal, na.policy = "omit", na.rm = TRUE)
+smoothed_lab <- focal(r_lab, w = window_s
+                      ize, fun = modal, na.policy = "omit", na.rm = TRUE)
+```
+
+```{r}
+convert_smoothed_to_df <- function(smoothed_raster, holdout_data) {
+  # Convert to terra
+  holdout_vect <- terra::vect(holdout_data, geom = c("Lon", "Lat"), crs = "EPSG:4326")
+  
+  # Reproject
+  holdout_vect_utm <- terra::project(holdout_vect, crs(smoothed_raster))
+
+  # Extract raster values
+  extracted_values <- terra::extract(smoothed_raster, holdout_vect_utm, ID = FALSE)
+
+  # .pred_class
+  results <- holdout_data %>%
+    mutate(
+      .pred_class = factor(
+        extracted_values[, 1],
+        levels = c(1, 0),
+        labels = c("TRUE", "FALSE")
+      )
+    ) %>%
+    drop_na()
+  
+  return(results)
+}
+
+# Apply function
+smoothed_rgb_df <- convert_smoothed_to_df(smoothed_rgb, holdout_data)
+smoothed_lab_df <- convert_smoothed_to_df(smoothed_lab, holdout_data)
+```
+
+```{r}
+# Function for smoothed preds
+evaluate_smoothed_predictions <- function(smoothed_df, model_name, color_space) {
+  f_meas_score <- f_meas(smoothed_df, truth = BT, estimate = .pred_class)
+  
+  tibble(
+    color_space = color_space,
+    model = model_name,
+    f_meas = f_meas_score$.estimate
+  )
+}
+
+# Compute F-measure
+smoothed_metrics <- bind_rows(
+  evaluate_smoothed_predictions(smoothed_rgb_df, "Logistic Regression", "RGB"),
+  evaluate_smoothed_predictions(smoothed_lab_df, "Logistic Regression", "CIELab")
+)
+
+# Display
+smoothed_metrics %>%
+  knitr::kable(
+    caption = "F-Measure for Smoothed Predictions (RGB & CIELab)",
+    digits = 4
+  ) %>%
+  kableExtra::kable_styling(full_width = FALSE)
+```
+
+```{r}
+# Function of conf mats
+visualize_conf_mat_smoothed <- function(smoothed_df, model_name, color_space) {
+  cm <- conf_mat(smoothed_df, truth = BT, estimate = .pred_class)
+  
+  autoplot(cm, type = "heatmap") +
+    labs(title = sprintf("%s (%s) - Smoothed", model_name, color_space))
+}
+
+# Generate
+logreg_cm_rgb_smoothed <- visualize_conf_mat_smoothed(smoothed_rgb_df, "Logistic Regression", "RGB")
+logreg_cm_lab_smoothed <- visualize_conf_mat_smoothed(smoothed_lab_df, "Logistic Regression", "CIELab")
+
+# Combine
+combined_cm_smoothed <- logreg_cm_rgb_smoothed + logreg_cm_lab_smoothed +
+  plot_annotation(title = "Holdout Set Confusion Matrices for Smoothed Predictions (RGB and CIELab)")
+
+combined_cm_smoothed
+```
+
 ```{r stop cluster}
 stopCluster(cl)
 registerDoSEQ()
