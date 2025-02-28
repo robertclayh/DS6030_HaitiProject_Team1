@@ -1565,16 +1565,15 @@ The final confusion matrices indicate that, to achieve a slightly improved F-mea
 logreg_cm_rgb <- overview_model_holdout(final_logreg_rgb_fit, "Logistic Regression (RGB)", logreg_rgb_fine_holdout_threshold)
 logreg_cm_lab <- overview_model_holdout(final_logreg_lab_fit, "Logistic Regression (CIELab)", logreg_lab_fine_holdout_threshold)
 
-# Combine the two plots side by side using patchwork
+# Combine
 combined_cm <- logreg_cm_rgb + logreg_cm_lab +
   plot_annotation(title = "Holdout Set Confusion Matrices for Finely Tuned Models (RGB and CIELab)")
 
-# Display the combined plot
 combined_cm
 ```
 
 ```{r}
-# Function to predict class labels at optimal threshold
+# Function to predict class
 predict_at_threshold_raster <- function(model, data, threshold) {
   predictions <- model %>%
     augment(data) %>%
@@ -1582,7 +1581,7 @@ predict_at_threshold_raster <- function(model, data, threshold) {
   return(predictions)
 }
 
-# Apply model predictions to holdout data
+# Apply model preds
 logreg_rgb_predictions <- predict_at_threshold_raster(final_logreg_rgb_fit, holdout_data, logreg_rgb_fine_holdout_threshold)
 logreg_lab_predictions <- predict_at_threshold_raster(final_logreg_lab_fit, holdout_data, logreg_lab_fine_holdout_threshold)
 ```
@@ -1592,7 +1591,7 @@ logreg_lab_predictions <- predict_at_threshold_raster(final_logreg_lab_fit, hold
 logreg_rgb_vect <- vect(logreg_rgb_predictions, geom = c("Lon", "Lat"), crs = "EPSG:4326")
 logreg_lab_vect <- vect(logreg_lab_predictions, geom = c("Lon", "Lat"), crs = "EPSG:4326")
 
-# Reproject to UTM (for consistent spatial operations)
+# Reproject to UTM
 logreg_rgb_utm <- project(logreg_rgb_vect, "EPSG:32618")
 logreg_lab_utm <- project(logreg_lab_vect, "EPSG:32618")
 ```
@@ -1609,14 +1608,14 @@ r_lab <- rasterize(logreg_lab_utm, raster_template, field = ".pred_class")
 r_rgb <- round(r_rgb)
 r_lab <- round(r_lab)
 ```
+
 ```{r}
 # 3×3 moving window
 window_size <- matrix(1, nrow = 3, ncol = 3)
 
-# Apply mode filter
-smoothed_rgb <- focal(r_rgb, w = window_size, fun = modal, na.policy = "omit", na.rm = TRUE)
-smoothed_lab <- focal(r_lab, w = window_s
-                      ize, fun = modal, na.policy = "omit", na.rm = TRUE)
+# Apply focal mode filtering with NA treated as 0, but only computing for non-NA cells
+smoothed_rgb <- focal(r_rgb, w = window_size, fun = modal, na.policy = "omit", fillvalue = 0)
+smoothed_lab <- focal(r_lab, w = window_size, fun = modal, na.policy = "omit", fillvalue = 0)
 ```
 
 ```{r}
