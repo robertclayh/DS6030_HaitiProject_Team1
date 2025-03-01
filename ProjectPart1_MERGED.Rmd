@@ -80,14 +80,26 @@ non_blue_files <- c(
 )
 
 blue_data <- map_dfr(blue_files, ~ 
-  read_table(.x, comment = ";", col_names = col_names) %>% 
-    select(Lat, Lon, Red, Green, Blue) %>% 
+  read_table(.x, comment = ";", col_names = col_names, col_types = cols(
+    `Map X` = col_double(),
+    `Map Y` = col_double(),
+    Red = col_integer(),
+    Green = col_integer(),
+    Blue = col_integer()
+  )) %>% 
+    select(`Map X`, `Map Y`, Red, Green, Blue) %>% 
     mutate(BT = "TRUE")
 )
 
 non_blue_data <- map_dfr(non_blue_files, ~ 
-  read_table(.x, comment = ";", col_names = col_names) %>% 
-    select(Lat, Lon, Red, Green, Blue) %>% 
+  read_table(.x, comment = ";", col_names = col_names, col_types = cols(
+    `Map X` = col_double(),
+    `Map Y` = col_double(),
+    Red = col_integer(),
+    Green = col_integer(),
+    Blue = col_integer()
+  )) %>% 
+    select(`Map X`, `Map Y`, Red, Green, Blue) %>% 
     mutate(BT = "FALSE")
 )
 
@@ -139,13 +151,12 @@ holdout_data <- convert_color_spaces(holdout_data)
 ### EDA
 
 ```{r prepare spatial data}
-# Convert
-holdout_data_sp <- holdout_data %>% 
-  rename(x = Lon, y = Lat)
-v <- terra::vect(holdout_data_sp, geom = c("x", "y"), crs = "EPSG:4326")
+# Map X and Map Y
+holdout_data_sp <- holdout_data %>%
+  rename(x = `Map X`, y = `Map Y`)
 
-# Reproject to UTM (meters)
-v_utm <- terra::project(v, "EPSG:32618")
+# Convert to spatial vector
+v_utm <- terra::vect(holdout_data_sp, geom = c("x", "y"), crs = "EPSG:32618")
 
 # Create an empty raster
 r_empty <- terra::rast(terra::ext(v_utm), resolution = 0.5, crs = "EPSG:32618")
@@ -158,10 +169,10 @@ r_b3 <- terra::rasterize(v_utm, r_empty, field = "Blue", overwrite = TRUE)
 # Combine
 rgb_raster <- c(r_b1, r_b2, r_b3)
 
-# Reproject
+# Reproject to WGS84
 rgb_raster_wgs <- terra::project(rgb_raster, "EPSG:4326", overwrite = TRUE)
 
-# Convert to brick for leaflet
+# Convert to brick
 rgb_brick <- raster::brick(rgb_raster_wgs)
 ```
 
@@ -171,8 +182,9 @@ m <- leaflet(options = leafletOptions(maxZoom = 25)) %>%
   addTiles(options = tileOptions(maxZoom = 25)) %>%
   leafem::addRasterRGB(rgb_brick, r = 1, g = 2, b = 3)
 
+htmlwidgets::saveWidget(m, "interactive_map.html")
+
 if (knitr::is_html_output()) {
-  htmlwidgets::saveWidget(m, "interactive_map.html")
   htmltools::includeHTML("interactive_map.html")
 } else {
   # Save a static image for PDF output
@@ -1572,6 +1584,8 @@ combined_cm <- logreg_cm_rgb + logreg_cm_lab +
 combined_cm
 ```
 
+### Smoothing
+
 ```{r}
 # Function to predict class
 predict_at_threshold_raster <- function(model, data, threshold) {
@@ -1588,8 +1602,8 @@ logreg_lab_predictions <- predict_at_threshold_raster(final_logreg_lab_fit, hold
 
 ```{r}
 # Convert to spatial vector
-logreg_rgb_vect <- vect(logreg_rgb_predictions, geom = c("Lon", "Lat"), crs = "EPSG:4326")
-logreg_lab_vect <- vect(logreg_lab_predictions, geom = c("Lon", "Lat"), crs = "EPSG:4326")
+logreg_rgb_vect <- vect(logreg_rgb_predictions, geom = c("Map X", "Map Y"), crs = "EPSG:32618")
+logreg_lab_vect <- vect(logreg_lab_predictions, geom = c("Map X", "Map Y"), crs = "EPSG:32618")
 
 # Reproject to UTM
 logreg_rgb_utm <- project(logreg_rgb_vect, "EPSG:32618")
@@ -1598,7 +1612,7 @@ logreg_lab_utm <- project(logreg_lab_vect, "EPSG:32618")
 
 ```{r}
 # Create empty raster
-raster_template <- rast(ext(logreg_rgb_utm), resolution = 0.1, crs = "EPSG:32618")
+raster_template <- rast(ext(logreg_rgb_utm), resolution = 0.08, crs = "EPSG:32618")
 
 # Rasterize 
 r_rgb <- rasterize(logreg_rgb_utm, raster_template, field = ".pred_class")
@@ -1615,7 +1629,7 @@ window_size <- matrix(1, nrow = 3, ncol = 3)
 
 # Apply focal mode filtering with NA treated as 0, but only computing for non-NA cells
 smoothed_rgb <- focal(r_rgb, w = window_size, fun = modal, na.policy = "omit", fillvalue = 0)
-smoothed_lab <- focal(r_lab, w = window_size, fun = modal, na.policy = "omit", fillvalue = 0)
+#smoothed_lab <- focal(r_lab, w = window_size, fun = modal, na.policy = "omit", fillvalue = 0)
 ```
 
 ```{r}
@@ -1645,7 +1659,7 @@ convert_smoothed_to_df <- function(smoothed_raster, holdout_data) {
 
 # Apply function
 smoothed_rgb_df <- convert_smoothed_to_df(smoothed_rgb, holdout_data)
-smoothed_lab_df <- convert_smoothed_to_df(smoothed_lab, holdout_data)
+#smoothed_lab_df <- convert_smoothed_to_df(smoothed_lab, holdout_data)
 ```
 
 ```{r}
@@ -1663,7 +1677,7 @@ evaluate_smoothed_predictions <- function(smoothed_df, model_name, color_space) 
 # Compute F-measure
 smoothed_metrics <- bind_rows(
   evaluate_smoothed_predictions(smoothed_rgb_df, "Logistic Regression", "RGB"),
-  evaluate_smoothed_predictions(smoothed_lab_df, "Logistic Regression", "CIELab")
+  #evaluate_smoothed_predictions(smoothed_lab_df, "Logistic Regression", "CIELab")
 )
 
 # Display
