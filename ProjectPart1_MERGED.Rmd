@@ -1824,7 +1824,7 @@ combined_plot
 predict_at_threshold_raster <- function(model, data) {
   predictions <- model %>%
     augment(data) %>%
-    select(`Map X`, `Map Y`, .pred_TRUE)  # Ensure only necessary columns are kept
+    select(`Map X`, `Map Y`, .pred_TRUE)
   return(predictions)
 }
 
@@ -1843,28 +1843,22 @@ raster_template <- rast(ext(logreg_rgb_vect), resolution = 0.08, crs = "EPSG:326
 r_pred_rgb <- rasterize(logreg_rgb_vect, raster_template, field = ".pred_TRUE")
 r_pred_lab <- rasterize(logreg_lab_vect, raster_template, field = ".pred_TRUE")
 
-# Define 3×3 moving window
 window_size <- matrix(1, nrow = 3, ncol = 3)
 
-# Compute local mean of .pred_TRUE in 3x3 neighborhood, ignoring NA values
 r_local_mean_rgb <- focal(r_pred_rgb, w = window_size, fun = mean, na.policy = "omit")
 r_local_mean_lab <- focal(r_pred_lab, w = window_size, fun = mean, na.policy = "omit")
 
-# Compute the absolute difference between each pixel's prediction and the local mean
 r_diff_rgb <- abs(r_pred_rgb - r_local_mean_rgb)
 r_diff_lab <- abs(r_pred_lab - r_local_mean_lab)
 ```
 
-```{r}
+```{r clustering plot}
 convert_clustering_to_df <- function(r_pred, r_diff, holdout_data) {
-  # Convert holdout data to spatial points (ensure correct column names)
   holdout_vect <- terra::vect(holdout_data, geom = c("Map X", "Map Y"), crs = "EPSG:32618")
   
-  # Extract raster values (.pred_TRUE and clustering metric)
   pred_values <- terra::extract(r_pred, holdout_vect, ID = FALSE)
   diff_values <- terra::extract(r_diff, holdout_vect, ID = FALSE)
   
-  # Combine with original holdout data
   results <- holdout_data %>%
     mutate(
       pred_TRUE = pred_values[, 1],
@@ -1899,6 +1893,112 @@ ggplot(holdout_data_clustering_lab, aes(x = pred_TRUE, y = clustering_metric)) +
     title = "Clustering Analysis of Prediction Probabilities (CIELab)"
   ) +
   theme_minimal()
+```
+
+### Spatial autocorrelation plot
+
+```{r spatial autocorr window}
+# Define a 3x3 moving window (all weights = 1)
+w <- matrix(1, nrow = 3, ncol = 3)
+
+# Compute local means for each band separately using the first band of the rgb_raster
+local_mean_red   <- focal(rgb_raster[[1]], w = w, fun = mean, na.rm = TRUE)
+local_mean_green <- focal(rgb_raster[[2]], w = w, fun = mean, na.rm = TRUE)
+local_mean_blue  <- focal(rgb_raster[[3]], w = w, fun = mean, na.rm = TRUE)
+
+diff_euclidean <- sqrt((rgb_raster[[1]] - local_mean_red)^2 +
+                       (rgb_raster[[2]] - local_mean_green)^2 +
+                       (rgb_raster[[3]] - local_mean_blue)^2)
+```
+
+```{r spatial autocorr plot}
+convert_diff_to_df <- function(diff_raster, holdout_data) {
+  holdout_vect <- terra::vect(holdout_data, geom = c("Map X", "Map Y"), crs = "EPSG:32618")
+  
+  diff_values <- terra::extract(diff_raster, holdout_vect, ID = FALSE)
+  
+  results <- holdout_data %>%
+    mutate(local_diff = diff_values[, 1]) %>%
+    drop_na()
+  
+  return(results)
+}
+
+df_diff <- convert_diff_to_df(diff_euclidean, holdout_data)
+```
+
+```{r random autocorr raster}
+holdout_data_random <- holdout_data
+n <- nrow(holdout_data_random)
+perm <- sample(n)
+holdout_data_random$`Map X` <- holdout_data$`Map X`[perm]
+holdout_data_random$`Map Y` <- holdout_data$`Map Y`[perm]
+
+v_random <- terra::vect(holdout_data_random, geom = c("Map X", "Map Y"), crs = "EPSG:32618")
+
+r_empty_random <- terra::rast(terra::ext(v_random), resolution = 0.08, crs = "EPSG:32618")
+
+r_b1_random <- terra::rasterize(v_random, r_empty_random, field = "Red", overwrite = TRUE)
+r_b2_random <- terra::rasterize(v_random, r_empty_random, field = "Green", overwrite = TRUE)
+r_b3_random <- terra::rasterize(v_random, r_empty_random, field = "Blue", overwrite = TRUE)
+
+rgb_raster_random <- c(r_b1_random, r_b2_random, r_b3_random)
+
+w <- matrix(1, nrow = 3, ncol = 3)
+
+local_mean_red_random   <- focal(rgb_raster_random[[1]], w = w, fun = mean, na.rm = TRUE)
+local_mean_green_random <- focal(rgb_raster_random[[2]], w = w, fun = mean, na.rm = TRUE)
+local_mean_blue_random  <- focal(rgb_raster_random[[3]], w = w, fun = mean, na.rm = TRUE)
+
+diff_red_random   <- rgb_raster_random[[1]] - local_mean_red_random
+diff_green_random <- rgb_raster_random[[2]] - local_mean_green_random
+diff_blue_random  <- rgb_raster_random[[3]] - local_mean_blue_random
+
+diff_euclidean_random <- sqrt(diff_red_random^2 + diff_green_random^2 + diff_blue_random^2)
+```
+
+```{r convert random back to df}
+convert_diff_to_df_random <- function(diff_raster, holdout_data) {
+  holdout_vect <- terra::vect(holdout_data, geom = c("Map X", "Map Y"), crs = "EPSG:32618")
+  
+  diff_values <- terra::extract(diff_raster, holdout_vect, ID = FALSE)
+  
+  results <- holdout_data %>%
+    mutate(local_diff_random = diff_values[, 1]) %>%
+    drop_na()
+  
+  return(results)
+}
+
+df_diff_random <- convert_diff_to_df_random(diff_euclidean_random, holdout_data)
+```
+
+```{r autocorr plot combine dfs}
+df_diff <- df_diff %>% rename(local_diff = local_diff)
+df_diff_random <- df_diff_random %>% rename(local_diff = local_diff_random)
+
+df_diff <- df_diff %>% mutate(group = "Original")
+df_diff_random <- df_diff_random %>% mutate(group = "Randomized")
+
+combined_df <- bind_rows(df_diff, df_diff_random)
+```
+
+```{r show autocorrplot}
+combined_df_filtered <- combined_df %>%
+  group_by(group) %>%
+  filter(local_diff <= quantile(local_diff, 0.80, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create a box plot comparing the two groups.
+ggplot(combined_df_filtered, aes(x = group, y = local_diff, fill = group)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(
+    title = "Comparison of Local Euclidean Differences\n(Original vs. Randomized Spatial Arrangement)",
+    x = "Data Type",
+    y = "Euclidean Difference from Local Mean"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("blue", "red"))
 ```
 
 
