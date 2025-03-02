@@ -178,6 +178,31 @@ rgb_raster_wgs <- terra::project(rgb_raster, "EPSG:4326", overwrite = TRUE)
 rgb_brick <- raster::brick(rgb_raster_wgs)
 ```
 
+```{r prepare spatial data fine}
+# Map X and Map Y
+holdout_data_sp <- holdout_data %>%
+  rename(x = `Map X`, y = `Map Y`)
+
+# Convert to spatial vector
+v_utm <- terra::vect(holdout_data_sp, geom = c("x", "y"), crs = "EPSG:32618")
+
+# Create an empty raster
+r_empty <- terra::rast(terra::ext(v_utm), resolution = 0.08, crs = "EPSG:32618")
+
+# Rasterize
+r_b1 <- terra::rasterize(v_utm, r_empty, field = "Red", overwrite = TRUE)
+r_b2 <- terra::rasterize(v_utm, r_empty, field = "Green", overwrite = TRUE)
+r_b3 <- terra::rasterize(v_utm, r_empty, field = "Blue", overwrite = TRUE)
+
+# Combine
+rgb_raster <- c(r_b1, r_b2, r_b3)
+
+# Reproject to WGS84
+rgb_raster_wgs <- terra::project(rgb_raster, "EPSG:4326", overwrite = TRUE)
+
+# Convert to brick
+rgb_brick <- raster::brick(rgb_raster_wgs)
+```
 
 ```{r create map}
 # Create the map
