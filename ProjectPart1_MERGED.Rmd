@@ -152,6 +152,121 @@ holdout_data <- convert_color_spaces(holdout_data)
 
 ### EDA
 
+```{r convex hulls}
+library(geometry)
+library(dplyr)
+library(ggplot2)
+
+# Function to compute convex hull volume
+compute_hull_volume <- function(data, color_columns) {
+  if (nrow(data) < length(color_columns) + 1) {
+    return(0)  # Not enough points to form a convex hull
+  }
+  hull <- convhulln(data[, color_columns], "FA")  # Compute the convex hull
+  return(hull$vol)  # Extract volume
+}
+
+# Monte Carlo-based convex hull overlap estimation
+estimate_hull_overlap <- function(data_true, data_false, color_columns, num_samples = 10000) {
+  
+  # Compute convex hulls for both classes
+  hull_true <- convhulln(data_true[, color_columns], "FA")
+  hull_false <- convhulln(data_false[, color_columns], "FA")
+  
+  if (is.null(hull_true) || is.null(hull_false)) {
+    return(NA)  # If hulls can't be computed, return NA
+  }
+  
+  # Get bounding box for sampling
+  all_points <- rbind(data_true[, color_columns], data_false[, color_columns])
+  bounds <- apply(all_points, 2, range)  # Min and max for each dimension
+  
+  # Generate random points inside bounding box
+  samples <- matrix(runif(num_samples * length(color_columns), 
+                          min = bounds[, 1], 
+                          max = bounds[, 2]), 
+                    ncol = length(color_columns))
+  
+  # Check how many random points fall inside both hulls
+  inside_true <- inhulln(hull_true, samples)
+  inside_false <- inhulln(hull_false, samples)
+  
+  intersection_fraction <- sum(inside_true & inside_false) / num_samples
+  
+  # Compute estimated intersection volume
+  min_hull_volume <- min(hull_true$vol, hull_false$vol)
+  estimated_overlap <- intersection_fraction * min_hull_volume
+  
+  # Compute normalized overlap fraction
+  total_volume <- hull_true$vol + hull_false$vol - estimated_overlap
+  overlap_fraction <- estimated_overlap / total_volume
+  
+  return(overlap_fraction)
+}
+
+# Function to calculate overlap for all color spaces
+calculate_overlap <- function(data, color_spaces, num_samples = 10000) {
+  results <- list()
+  
+  for (color_space in names(color_spaces)) {
+    message("Processing: ", color_space)
+    
+    # Select relevant columns
+    selected_cols <- c("BT", color_spaces[[color_space]])
+    subset_data <- data %>% select(all_of(selected_cols))
+    
+    # Extract BT TRUE and FALSE points
+    bt_true <- subset_data %>% filter(BT == TRUE) %>% select(-BT) %>% na.omit()
+    bt_false <- subset_data %>% filter(BT == FALSE) %>% select(-BT) %>% na.omit()
+    
+    # Ensure we have enough points for convex hull calculation
+    if (nrow(bt_true) < 4 | nrow(bt_false) < 4) {
+      results[[color_space]] <- NA
+      next  # Skip this iteration if convex hull cannot be computed
+    }
+    
+    # Compute overlap fraction using Monte Carlo sampling
+    overlap_fraction <- estimate_hull_overlap(bt_true, bt_false, color_spaces[[color_space]], num_samples)
+    
+    # Store results
+    results[[color_space]] <- overlap_fraction
+  }
+  
+  # Convert to dataframe
+  overlap_df <- tibble(Color_Space = names(results), Overlap_Fraction = unlist(results))
+  
+  return(overlap_df)
+}
+
+# Define color spaces
+color_spaces <- list(
+  "RGB" = c("Red", "Green", "Blue"),
+  "CIELab" = c("Luminance", "a", "b"),
+  "HSV" = c("Hue", "Saturation", "Value")
+)
+
+# Compute overlap fractions for train and holdout datasets
+train_overlap <- calculate_overlap(train_data, color_spaces, num_samples = 50000)
+holdout_overlap <- calculate_overlap(holdout_data, color_spaces, num_samples = 50000)
+
+# Convert results to data frame for plotting
+overlap_df <- data.frame(
+  ColorSpace = rep(names(color_spaces), each = 2),
+  Dataset = rep(c("Train", "Holdout"), times = length(color_spaces)),
+  OverlapFraction = unlist(c(train_overlap$Overlap_Fraction, holdout_overlap$Overlap_Fraction))
+)
+
+# Plot the overlap results
+ggplot(overlap_df, aes(x = ColorSpace, y = OverlapFraction, fill = Dataset)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Convex Hull Overlap Between BT Classes", 
+       x = "Color Space", 
+       y = "Overlap Fraction") +
+  theme_minimal() +
+  scale_fill_manual(values = c("red", "blue"))
+
+```
+
 ```{r prepare spatial data}
 # Map X and Map Y
 holdout_data_sp <- holdout_data %>%
