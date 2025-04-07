@@ -1,0 +1,220 @@
+---
+title: "Project Part 1"
+author: "Virginia Brame, Clay Harris, Hai Liu"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  word_document: default
+header-includes: \usepackage{float}
+---
+```{r setup}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  cache = TRUE,
+  autodep = TRUE,
+  fig.align = "center",
+  fig.pos = "H",
+  out.width = "100%"
+)
+```
+
+```{r echo true, eval=FALSE}
+# Set eval to TRUE if you want to see the R code outputs
+knitr::opts_chunk$set(
+  echo = TRUE)
+```
+
+## Data (loading, wrangling, EDA)
+
+```{r parallel}
+#| cache: FALSE
+#| message: FALSE
+library(doParallel)
+cl <- makePSOCKcluster(parallel::detectCores(logical = FALSE))
+registerDoParallel(cl)
+```
+
+```{r libraries}
+#| cache: FALSE
+#| warning: FALSE
+#| message: FALSE
+library(tidyverse)
+library(tidymodels)
+library(discrim)
+library(leaflet)
+library(terra)
+library(htmlwidgets)
+library(leafem)
+library(colordistance)
+library(jpeg)
+library(patchwork)
+library(probably)
+library(gridExtra)
+library(plotly)
+library(mapview)
+library(farver)
+library(kableExtra)
+library(leaflet.extras2)
+library(webshot2)
+```
+
+### Data loading and wrangling
+
+Since we are only interested in the level of "Blue Tarp", I create a new variable `BT` with only two classes, i.e., "TRUE" for "Blue Tarp" and "FALSE" for everything else.
+
+```{r holdout data processing}
+#| message: FALSE
+#| warning: FALSE
+
+col_names <- c('ID','X','Y','Map X','Map Y','Lat','Lon','Red','Green','Blue')
+
+blue_files <- c(
+  "orthovnir069_ROI_Blue_Tarps.txt",
+  "orthovnir067_ROI_Blue_Tarps.txt",
+  "orthovnir078_ROI_Blue_Tarps.txt"
+)
+
+non_blue_files <- c(
+  "orthovnir057_ROI_NON_Blue_Tarps.txt",
+  "orthovnir078_ROI_NON_Blue_Tarps.txt",
+  "orthovnir067_ROI_NOT_Blue_Tarps.txt",
+  "orthovnir069_ROI_NOT_Blue_Tarps.txt"
+)
+
+blue_data <- map_dfr(blue_files, ~ 
+  read_table(.x, comment = ";", col_names = col_names, col_types = cols(
+    `Map X` = col_double(),
+    `Map Y` = col_double(),
+    Red = col_integer(),
+    Green = col_integer(),
+    Blue = col_integer()
+  )) %>% 
+    select(`Map X`, `Map Y`, Red, Green, Blue) %>% 
+    mutate(BT = "TRUE")
+)
+
+non_blue_data <- map_dfr(non_blue_files, ~ 
+  read_table(.x, comment = ";", col_names = col_names, col_types = cols(
+    `Map X` = col_double(),
+    `Map Y` = col_double(),
+    Red = col_integer(),
+    Green = col_integer(),
+    Blue = col_integer()
+  )) %>% 
+    select(`Map X`, `Map Y`, Red, Green, Blue) %>% 
+    mutate(BT = "FALSE")
+)
+
+holdout_data <- bind_rows(blue_data, non_blue_data) %>% 
+  mutate(BT = factor(BT, levels = c("TRUE", "FALSE")))
+```
+
+```{r training data processing}
+#| message: FALSE
+
+train_data <- read_csv("HaitiPixels.csv") %>%
+  mutate(BT = factor(if_else(Class == "Blue Tarp", "TRUE", "FALSE"), levels = c("TRUE", "FALSE"))) %>%
+  select(Red, Green, Blue, BT)
+```
+
+```{r add CIELab and HSV}
+convert_color_spaces <- function(data) {
+  # Convert RGB to CIELab
+  lab_values <- farver::convert_colour(
+    as.matrix(data[, c("Red", "Green", "Blue")]), 
+    from = "rgb", 
+    to = "lab"
+  )
+  
+  # Convert RGB to HSV
+  hsv_values <- farver::convert_colour(
+    as.matrix(data[, c("Red", "Green", "Blue")]), 
+    from = "rgb", 
+    to = "hsv"
+  )
+  
+  # Convert
+  lab_df <- as.data.frame(lab_values)
+  colnames(lab_df) <- c("Luminance", "a", "b") 
+  hsv_df <- as.data.frame(hsv_values)
+  colnames(hsv_df) <- c("Hue", "Saturation", "Value")
+  
+  # Bind new columns
+  data <- cbind(data, lab_df, hsv_df)
+  
+  return(data)
+}
+
+# Apply function
+train_data <- convert_color_spaces(train_data)
+holdout_data <- convert_color_spaces(holdout_data)
+```
+
+```{r build knn}
+# Define RGB model formula and recipe
+rgb_formula <- BT ~ Red + Green + Blue
+rgb_recipe <- recipe(rgb_formula, data = train_data)
+
+# Set up 10-fold cross-validation (stratified by BT)
+set.seed(6030)
+resamples <- vfold_cv(train_data, v = 10, strata = BT)
+custom_metrics <- metric_set(roc_auc, accuracy, precision, f_meas)
+cv_control <- control_resamples(save_pred = TRUE)
+
+# Define the k-NN specification with tunable neighbors
+knn_spec <- nearest_neighbor(
+  mode = "classification", 
+  neighbors = tune()
+) %>% 
+  set_engine("kknn")
+
+# Create workflow
+knn_wf <- workflow() %>% 
+  add_recipe(rgb_recipe) %>% 
+  add_model(knn_spec)
+
+# Define the k-NN specification with tunable neighbors
+knn_spec <- nearest_neighbor(
+  mode = "classification", 
+  neighbors = tune()
+) %>% 
+  set_engine("kknn")
+
+# Create workflow with the RGB recipe
+knn_wf <- workflow() %>% 
+  add_recipe(rgb_recipe) %>% 
+  add_model(knn_spec)
+
+# Extract the parameter set and update the neighbor range
+knn_params <- parameters(knn_wf) %>% 
+  update(neighbors = neighbors(range = c(1, 15)))
+
+# Create a regular tuning grid with 15 levels for the neighbors parameter
+grid <- grid_regular(knn_params, levels = 15)
+
+# Tune the grid using 10-fold cross-validation
+knn_tune <- tune_grid(
+  knn_wf,
+  resamples = resamples,
+  grid = grid,
+  metrics = custom_metrics,
+  control = cv_control
+)
+
+autoplot(knn_tune)
+knn_best <- select_best(knn_tune, metric = "f_meas")
+
+# Finalize workflow and fit on resamples
+knn_final <- finalize_workflow(knn_wf, knn_best)
+knn_res <- fit_resamples(
+  knn_final, 
+  resamples = resamples, 
+  metrics = custom_metrics,
+  control = cv_control
+)
+```
+
+```{r stop cluster}
+stopCluster(cl)
+registerDoSEQ()
+```
