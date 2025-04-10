@@ -111,7 +111,25 @@ holdout_data <- bind_rows(blue_data, non_blue_data) %>%
 
 train_data <- read_csv("HaitiPixels.csv") %>%
   mutate(BT = factor(if_else(Class == "Blue Tarp", "TRUE", "FALSE"), levels = c("TRUE", "FALSE"))) %>%
-  select(Red, Green, Blue, BT)
+  select(Red, Green, Blue, BT, Class)
+```
+
+```{r create random grid}
+train_data <- train_data %>%
+  group_by(Class) %>%
+  slice_sample(prop = 1) %>%  # Randomly shuffle the rows within each class
+  mutate(
+    # Assign a sequential pixel number after the random shuffle
+    pixel_number = row_number(),
+    # Compute the minimum grid dimension required to form a square
+    grid_dim = ceiling(sqrt(n())),
+    # Determine the x coordinate (column index) in the grid
+    x = ((pixel_number - 1) %% grid_dim) + 1,
+    # Determine the y coordinate (row index) in the grid
+    y = floor((pixel_number - 1) / grid_dim) + 1
+  ) %>%
+  ungroup() %>%
+  select(-grid_dim, -pixel_number)
 ```
 
 ```{r add CIELab and HSV}
@@ -189,15 +207,59 @@ holdout_data <- holdout_data %>%
   mutate(Hue_Shifted = (Hue + (360 * 0.25)) %% 1)
 ```
 
+```{r calculate area stats}
+library(dplyr)
+library(purrr)
+
+# Assume that 'train_data_grid_random' is a data frame that includes:
+# - A column “Class” (the grouping variable)
+# - Grid coordinates “x” and “y” (generated as described previously)
+# - Predictor variables: Red, Green, Blue, Luminance, a, b, Hue, Saturation, Value, Red_Prop, Green_Prop, Blue_Prop, Dispersion, Hue_Shifted
+
+# Define a function to compute the 3×3 neighborhood means for a given observation within the same class
+compute_neighbor_means <- function(df, group_val, cur_x, cur_y) {
+  df %>%
+    filter(Class == group_val,
+           x >= (cur_x - 1), x <= (cur_x + 1),
+           y >= (cur_y - 1), y <= (cur_y + 1)) %>%
+    summarize(
+      Red_9 = mean(Red, na.rm = TRUE),
+      Green_9 = mean(Green, na.rm = TRUE),
+      Blue_9 = mean(Blue, na.rm = TRUE),
+      Luminance_9 = mean(Luminance, na.rm = TRUE),
+      a_9 = mean(a, na.rm = TRUE),
+      b_9 = mean(b, na.rm = TRUE),
+      Hue_9 = mean(Hue, na.rm = TRUE),
+      Saturation_9 = mean(Saturation, na.rm = TRUE),
+      Value_9 = mean(Value, na.rm = TRUE),
+      Red_Prop_9 = mean(Red_Prop, na.rm = TRUE),
+      Green_Prop_9 = mean(Green_Prop, na.rm = TRUE),
+      Blue_Prop_9 = mean(Blue_Prop, na.rm = TRUE),
+      Dispersion_9 = mean(Dispersion, na.rm = TRUE),
+      Hue_Shifted_9 = mean(Hue_Shifted, na.rm = TRUE)
+    )
+}
+
+# Apply the neighborhood function to each row of the training data (randomly ordered grid)
+# and append the 3×3 neighborhood means as new columns.
+neighbor_means_df <- train_data_grid_random %>%
+  rowwise() %>%
+  mutate(neighbor_values = list(compute_neighbor_means(train_data_grid_random, Class, x, y))) %>%
+  ungroup() %>%
+  unnest(cols = c(neighbor_values))
+
+# Inspect the updated data frame (showing the new neighborhood mean features)
+print(head(neighbor_means_df))
+```
+
 ```{r lasso}
-formula <- BT ~ Red + Green + Blue + Luminance + a + b + Hue + Saturation + Value + Red_Prop + Green_Prop + Blue_Prop +Dispersion + Hue_Shifted
+formula <- BT ~ Red + Green + Blue + Luminance + a + b + Hue + Saturation + Value + Red_Prop + Green_Prop + Blue_Prop + Dispersion + Hue_Shifted
 
 rec <- recipe(formula, data = train_data) %>%
   step_normalize(all_numeric_predictors())
 
 set.seed(1) # for reproducibility
 resamples <- vfold_cv(train_data, v=10, strata=BT)
-metrics <- metric_set(roc_auc, accuracy)
 cv_control <- control_resamples(save_pred=TRUE)
 
 tune_logreg_spec <- logistic_reg(engine="glmnet", mode="classification",
@@ -468,4 +530,306 @@ roc_diff_results
 
 ```{r save roc cv kable}
 save_kable(roc_diff_results, file = "roc_diff_results_elastic.png", zoom = 2)
+```
+
+```{r optimal thresholds}
+# Find optimal thresholds
+threshold_scan <- function(model, data, model_name) {
+  threshold_data <- model %>%
+    augment(data) %>%
+    probably::threshold_perf(
+      truth = BT,
+      estimate = .pred_TRUE,
+      thresholds = seq(0.01, 0.99, 0.01),
+      event_level = "first",
+      metrics = metric_set(f_meas)
+    )
+  opt_threshold <- threshold_data %>%
+    drop_na() %>%
+    arrange(desc(.estimate)) %>%
+    slice(1)
+  list(
+    threshold = opt_threshold$.threshold,
+    threshold_data = threshold_data,
+    opt_threshold = opt_threshold,
+    model_name = model_name
+  )
+}
+```
+
+```{r scan threshold holdout}
+# For RGB model:
+if (file.exists("logreg_rgb_result.rds")) {
+  logreg_rgb_result <- readRDS("logreg_rgb_result.rds")
+} else {
+  logreg_rgb_result <- threshold_scan(final_logreg_rgb_fit, holdout_data, "Logistic Regression (RGB)")
+  saveRDS(logreg_rgb_result, "logreg_rgb_result.rds")
+}
+
+# For CIELab model:
+if (file.exists("logreg_lab_result.rds")) {
+  logreg_lab_result <- readRDS("logreg_lab_result.rds")
+} else {
+  logreg_lab_result <- threshold_scan(final_logreg_lab_fit, holdout_data, "Logistic Regression (CIELab)")
+  saveRDS(logreg_lab_result, "logreg_lab_result.rds")
+}
+
+# For HSV model:
+if (file.exists("logreg_hsv_result.rds")) {
+  logreg_hsv_result <- readRDS("logreg_hsv_result.rds")
+} else {
+  logreg_hsv_result <- threshold_scan(final_logreg_hsv_fit, holdout_data, "Logistic Regression (HSV)")
+  saveRDS(logreg_hsv_result, "logreg_hsv_result.rds")
+}
+
+# For Tuned Logistic Regression (Elastic Net):
+if (file.exists("logreg_tune_result.rds")) {
+  logreg_tune_result <- readRDS("logreg_tune_result.rds")
+} else {
+  logreg_tune_result <- threshold_scan(final_logreg_fit, holdout_data, "Tuned Logistic Regression (Elastic Net)")
+  saveRDS(logreg_tune_result, "logreg_tune_result.rds")
+}
+```
+
+```{r optimal thresholds set}
+# Optimal thresholds
+logreg_rgb_holdout_threshold <- logreg_rgb_result$threshold
+
+logreg_lab_holdout_threshold <- logreg_lab_result$threshold
+
+logreg_hsv_holdout_threshold <- logreg_hsv_result$threshold
+
+logreg_tune_holdout_threshold <- logreg_tune_result$threshold
+```
+
+```{r combine threshold graphs}
+#| fig.width: 6
+#| fig.height: 9
+#| fig.cap: F-Measure by threshold for each model and color space
+#| warning: FALSE
+
+# Function to plot threshold performance
+plot_threshold <- function(result) {
+  ggplot(result$threshold_data, aes(x = .threshold, y = .estimate)) +
+    geom_line() +
+    geom_point(data = result$opt_threshold, color = "red", size = 2) +
+    labs(title = result$model_name, x = "Threshold", y = "F-Measure") +
+    coord_cartesian(ylim = c(0, 1))
+}
+
+## RGB
+g_logreg_rgb <- plot_threshold(logreg_rgb_result)
+
+## CIELab
+g_logreg_lab <- plot_threshold(logreg_lab_result)
+
+## HSV
+g_logreg_hsv <- plot_threshold(logreg_hsv_result)
+
+## Tuned
+g_logreg_tune <- plot_threshold(logreg_tune_result)
+
+# Combine plots
+combined_thresholds <- (g_logreg_rgb) /
+                       (g_logreg_lab) /
+                       (g_logreg_hsv) /
+                        (g_logreg_tune) +
+                       plot_annotation(title = "Threshold Performance (F-Measure) Across Color Spaces")
+
+combined_thresholds
+
+ggsave("combined_thresholds_tune.png", plot = combined_thresholds, width = 6, height = 9, dpi = 600)
+```
+
+```{r scan threshold cv}
+threshold_scan_cv <- function(cv_obj, model_name) {
+  threshold_data <- cv_obj %>%
+    collect_predictions() %>%
+    probably::threshold_perf(
+      truth = BT,
+      estimate = .pred_TRUE,
+      thresholds = seq(0.05, 0.95, 0.01),
+      event_level = "first",
+      metrics = metric_set(f_meas)
+    )
+  opt_threshold <- threshold_data %>%
+    drop_na() %>%
+    arrange(desc(.estimate)) %>%
+    slice(1)
+  list(
+    threshold = opt_threshold$.threshold
+  )
+}
+
+# Compute thresholds
+
+## RGB Models
+logreg_rgb_train_result <- threshold_scan_cv(logreg_rgb_cv, "Logistic Regression (RGB)")
+
+## CIELab Models
+logreg_lab_train_result <- threshold_scan_cv(logreg_lab_cv, "Logistic Regression (CIELab)")
+
+## HSV Models
+logreg_hsv_train_result <- threshold_scan_cv(logreg_hsv_cv, "Logistic Regression (HSV)")
+
+## Tuned Models
+logreg_tune_train_result <- threshold_scan_cv(final_logreg_cv, "Tuned Logistic Regression (Elastic Net)")
+
+# Extract optimal thresholds
+
+## RGB
+logreg_rgb_train_threshold <- logreg_rgb_train_result$threshold
+
+## CIELab
+logreg_lab_train_threshold <- logreg_lab_train_result$threshold
+
+## HSV
+logreg_hsv_train_threshold <- logreg_hsv_train_result$threshold
+
+## Tune
+logreg_tune_train_threshold <- logreg_tune_train_result$threshold
+```
+
+```{r model evaluation functions}
+predict_at_threshold <- function(model, data, threshold) {
+  model %>%
+    augment(data) %>%
+    mutate(
+      .pred_class = make_two_class_pred(
+        .pred_TRUE,
+        c("TRUE", "FALSE"),
+        threshold = threshold
+      )
+    )
+}
+
+calculate_metrics_at_threshold <- function(
+  model,
+  train,
+  holdout,
+  model_name,
+  color_space,
+  train_threshold,
+  holdout_threshold
+) {
+  bind_rows(
+    # Metrics for the training set
+    bind_cols(
+      color_space = color_space,
+      model = model_name,
+      dataset = "train",
+      threshold = train_threshold,
+      metrics(predict_at_threshold(model, train, train_threshold), truth = BT, estimate = .pred_class)
+    ),
+    bind_cols(
+      color_space = color_space,
+      model = model_name,
+      dataset = "train",
+      threshold = train_threshold,
+      roc_auc(model %>% augment(train), truth = BT, .pred_TRUE, event_level = "first")
+    ),
+    bind_cols(
+      color_space = color_space,
+      model = model_name,
+      dataset = "train",
+      threshold = train_threshold,
+      f_meas(predict_at_threshold(model, train, train_threshold), truth = BT, estimate = .pred_class)
+    ),
+    bind_cols(
+      color_space = color_space,
+      model = model_name,
+      dataset = "train",
+      threshold = train_threshold,
+      sens(predict_at_threshold(model, train, train_threshold), truth = BT, estimate = .pred_class)
+    ),
+    # Metrics for the holdout set
+    bind_cols(
+      color_space = color_space,
+      model = model_name,
+      dataset = "holdout",
+      threshold = holdout_threshold,
+      metrics(predict_at_threshold(model, holdout, holdout_threshold), truth = BT, estimate = .pred_class)
+    ),
+    bind_cols(
+      color_space = color_space,
+      model = model_name,
+      dataset = "holdout",
+      threshold = holdout_threshold,
+      roc_auc(model %>% augment(holdout), BT, .pred_TRUE, event_level = "first")
+    ),
+    bind_cols(
+      color_space = color_space,
+      model = model_name,
+      dataset = "holdout",
+      threshold = holdout_threshold,
+      f_meas(predict_at_threshold(model, holdout, holdout_threshold), truth = BT, estimate = .pred_class)
+    ),
+    bind_cols(
+      color_space = color_space,
+      model = model_name,
+      dataset = "holdout",
+      threshold = holdout_threshold,
+      sens(predict_at_threshold(model, holdout, holdout_threshold), truth = BT, estimate = .pred_class)
+    )
+  )
+}
+```
+
+```{r metrics get}
+metrics_at_threshold <- bind_rows(
+  # RGB Models
+  calculate_metrics_at_threshold(
+    final_logreg_rgb_fit, train_data, holdout_data,
+    "Logistic Regression", "RGB",
+    logreg_rgb_train_threshold, logreg_rgb_holdout_threshold
+  ),
+  
+  # CIELab Models
+  calculate_metrics_at_threshold(
+    final_logreg_lab_fit, train_data, holdout_data,
+    "Logistic Regression", "CIELab",
+    logreg_lab_train_threshold, logreg_lab_holdout_threshold
+  ),
+  
+  # HSV Models
+  calculate_metrics_at_threshold(
+    final_logreg_hsv_fit, train_data, holdout_data,
+    "Logistic Regression", "HSV",
+    logreg_hsv_train_threshold, logreg_hsv_holdout_threshold
+  ),
+  
+  # Tuned Models
+  calculate_metrics_at_threshold(
+    final_logreg_fit, train_data, holdout_data,
+    "Tuned Logistic Regression (Elastic Net)", "All Predictors",
+    logreg_tune_train_threshold, logreg_tune_holdout_threshold
+  )
+  
+) %>%
+  arrange(dataset, color_space, model)
+```
+
+```{r model eval table}
+metrics_at_threshold_tune <- metrics_at_threshold %>%
+  mutate(
+    dataset = factor(dataset, levels = c("train", "holdout")),
+    color_space = factor(color_space, levels = c("RGB", "CIELab", "HSV", "All Predictors")),
+    model = factor(model, levels = c("Logistic Regression", "LDA", "QDA", "Tuned Logistic Regression (Elastic Net)"))
+  ) %>%
+  tidyr::pivot_wider(names_from = .metric, values_from = .estimate) %>%
+  select(
+    dataset, color_space, model, threshold, 
+    accuracy, roc_auc, sens, f_meas
+  ) %>%
+  arrange(dataset, color_space, model, threshold) %>%
+  knitr::kable(
+    caption = "Final metrics for models at chosen thresholds.",
+    digits = 3
+  ) %>%
+  kableExtra::kable_styling(full_width = FALSE) %>%
+  kableExtra::collapse_rows(columns = 1:2, valign = "top")
+
+metrics_at_threshold_tune
+
+save_kable(metrics_at_threshold_tune, file = "metrics_at_threshold_tune.png", zoom = 2)
 ```
