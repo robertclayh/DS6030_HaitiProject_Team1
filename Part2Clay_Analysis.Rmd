@@ -113,6 +113,88 @@ custom_metrics <- metric_set(roc_auc, accuracy, precision, f_meas)
 cv_control <- control_resamples(save_pred = TRUE)
 ```
 
+```{r knn with pca}
+library(tidymodels)
+library(tune)
+library(ggplot2)
+
+# Define the model formula (using all predictors including PCA-tuned ones)
+knn_formula <- BT ~ Red + Green + Blue + Luminance + a + b + Hue + Saturation + Value +
+  Red_Prop + Green_Prop + Blue_Prop + Dispersion + Hue_Shifted +
+  Red_9 + Green_9 + Blue_9 + Luminance_9 + a_9 + b_9 + Hue_9 + Saturation_9 + Value_9 +
+  Red_Prop_9 + Green_Prop_9 + Blue_Prop_9 + Dispersion_9 + Hue_Shifted_9
+
+# Build a recipe: normalize all numeric predictors then apply PCA with tunable components
+rec <- recipe(knn_formula, data = train_data) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_pca(all_predictors(), num_comp = tune())
+
+# Define 10-fold cross-validation using stratification on BT
+set.seed(1)
+resamples <- vfold_cv(train_data, v = 10, strata = BT)
+cv_control <- control_resamples(save_pred = TRUE)
+
+# Specify the k-NN model with tunable neighbors
+tune_knn_spec <- nearest_neighbor(neighbors = tune()) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+# Create a workflow with the recipe and model
+tune_knn_wf <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(tune_knn_spec)
+
+# Extract tunable parameters; here we tune both 'neighbors' and the number of PCA components
+knn_params <- extract_parameter_set_dials(tune_knn_wf) %>%
+  update(
+    neighbors = neighbors(range = c(1, 100)),
+    num_comp = num_comp(range = c(1, 28))
+  )
+
+# First pass: Grid tuning over a regular grid (e.g., 5 levels for each parameter)
+set.seed(1)
+grid_results_knn <- tune_grid(
+  tune_knn_wf,
+  resamples = resamples,
+  grid = grid_regular(knn_params, levels = 5),
+  metrics = metric_set(roc_auc, accuracy),
+  control = cv_control
+)
+```
+
+```{r knn autoplot 1}
+autoplot(grid_results_knn)
+```
+
+```{r knn second pass bayes}
+# Second pass: Bayesian optimization using the grid tuning results as initial design;
+# here we run 20 iterations of Bayesian tuning.
+set.seed(1)
+bayes_results_knn <- tune_bayes(
+  tune_knn_wf,
+  resamples = resamples,
+  initial = grid_results_knn,
+  param_info = knn_params,
+  iter = 5,
+  metrics = metric_set(roc_auc, accuracy),
+  control = control_bayes(verbose = TRUE, save_pred = TRUE)
+)
+
+# Select the best parameters (for example, using roc_auc as the primary metric)
+best_knn <- select_best(bayes_results_knn, metric = "roc_auc")
+
+# Finalize the workflow with the best parameters, and fit the model to the full training data
+final_knn_wf <- finalize_workflow(tune_knn_wf, best_knn)
+final_knn_fit <- final_knn_wf %>% fit(data = train_data)
+
+# View the final model (the underlying fitted model can be extracted with extract_fit_parsnip())
+final_knn_fit
+```
+
+```{r autoplot bayes knn}
+autoplot(bayes_results_knn)
+```
+
 ```{r set formulas}
 # RGB Model Formula and Recipe
 rgb_formula <- BT ~ Red + Green + Blue
